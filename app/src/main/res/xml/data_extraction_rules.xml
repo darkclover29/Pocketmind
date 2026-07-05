@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    PocketMind data extraction rules (Android 12+).
+
+    The app is designed to keep all data private and local.
+    We exclude ALL data from cloud backup (no chat history, no settings
+    should leave the device via Google Backup).
+
+    Device-to-device transfers (e.g. phone migration) are also disabled
+    to prevent accidental exposure. Users can export data manually if needed.
+-->
+<data-extraction-rules>
+    <cloud-backup disableIfNoEncryptionCapabilities="true">
+        <!-- Exclude everything — the app is private by design -->
+        <exclude domain="all" />
+    </cloud-backup>
+    <device-transfer>
+        <!-- Exclude DB and prefs from device transfers for privacy -->
+        <exclude domain="database" />
+        <exclude domain="sharedpref" />
+        <exclude domain="file" />
+    </device-transfer>
+</data-extraction-rules>

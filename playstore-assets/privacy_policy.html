@@ -1,0 +1,219 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>PocketMind — Privacy Policy</title>
+  <style>
+    :root {
+      --bg:      #0A0A0A;
+      --surface: #111118;
+      --border:  #2A2A36;
+      --amber:   #F59E0B;
+      --text:    #E8E8F0;
+      --muted:   #888898;
+      --radius:  12px;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      font-size: 16px;
+      line-height: 1.7;
+      padding: 0 16px 64px;
+    }
+    header {
+      max-width: 760px;
+      margin: 0 auto;
+      padding: 56px 0 32px;
+      border-bottom: 1px solid var(--border);
+    }
+    .logo-row {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      margin-bottom: 20px;
+    }
+    .logo-circle {
+      width: 48px; height: 48px;
+      border-radius: 12px;
+      background: #1A1A24;
+      border: 1px solid var(--border);
+      display: flex; align-items: center; justify-content: center;
+      font-size: 24px;
+    }
+    .app-name { font-size: 22px; font-weight: 700; color: var(--text); }
+    h1 { font-size: 36px; font-weight: 800; margin-bottom: 8px; }
+    .meta { color: var(--muted); font-size: 14px; }
+    .badge {
+      display: inline-block;
+      margin-top: 16px;
+      padding: 6px 14px;
+      background: rgba(245,158,11,0.12);
+      border: 1px solid rgba(245,158,11,0.35);
+      border-radius: 50px;
+      color: var(--amber);
+      font-size: 13px;
+      font-weight: 600;
+    }
+    main { max-width: 760px; margin: 0 auto; padding-top: 40px; }
+    .tldr {
+      background: #141420;
+      border: 1px solid var(--amber);
+      border-radius: var(--radius);
+      padding: 24px 28px;
+      margin-bottom: 40px;
+    }
+    .tldr-title { color: var(--amber); font-weight: 700; font-size: 15px; margin-bottom: 12px; }
+    .tldr ul { padding-left: 20px; }
+    .tldr li { margin-bottom: 6px; font-size: 15px; }
+    section { margin-bottom: 40px; }
+    h2 {
+      font-size: 20px; font-weight: 700;
+      color: var(--text);
+      margin-bottom: 12px;
+      padding-bottom: 8px;
+      border-bottom: 1px solid var(--border);
+    }
+    p { color: #C8C8D8; margin-bottom: 12px; }
+    ul { padding-left: 20px; margin-bottom: 12px; }
+    li { color: #C8C8D8; margin-bottom: 6px; }
+    a { color: var(--amber); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    footer {
+      max-width: 760px;
+      margin: 0 auto;
+      padding-top: 40px;
+      border-top: 1px solid var(--border);
+      color: var(--muted);
+      font-size: 13px;
+    }
+  </style>
+</head>
+<body>
+
+<header>
+  <div class="logo-row">
+    <div class="logo-circle">🧠</div>
+    <span class="app-name">PocketMind</span>
+  </div>
+  <h1>Privacy Policy</h1>
+  <p class="meta">Effective date: June 27, 2026 &nbsp;·&nbsp; Last updated: June 27, 2026</p>
+  <span class="badge">🔒 Zero data collection</span>
+</header>
+
+<main>
+
+  <div class="tldr">
+    <div class="tldr-title">TL;DR — The Short Version</div>
+    <ul>
+      <li>PocketMind collects <strong>zero</strong> personal data.</li>
+      <li>Everything runs on your device. Nothing is sent to any server.</li>
+      <li>No analytics, no crash reports, no advertising identifiers.</li>
+      <li>No internet permission is declared — the app is physically incapable of network calls.</li>
+    </ul>
+  </div>
+
+  <section>
+    <h2>1. Who We Are</h2>
+    <p>PocketMind is an on-device AI assistant developed by Harsh Tiwari. The app runs entirely offline on your Android device.</p>
+    <p>Contact: <a href="mailto:harshtiwari493@gmail.com">harshtiwari493@gmail.com</a></p>
+  </section>
+
+  <section>
+    <h2>2. Data We Collect</h2>
+    <p><strong>We collect no data.</strong> PocketMind does not collect, store remotely, transmit, or share any personal information or usage data. Specifically:</p>
+    <ul>
+      <li>No account or sign-in is required.</li>
+      <li>No names, email addresses, or identifiers are ever collected.</li>
+      <li>No device identifiers (IMEI, advertising ID, etc.) are accessed or transmitted.</li>
+      <li>No usage analytics or behavioral telemetry.</li>
+      <li>No crash reporting or diagnostic data is sent anywhere.</li>
+    </ul>
+  </section>
+
+  <section>
+    <h2>3. How Your Conversations Are Stored</h2>
+    <p>Conversation history is stored in a local SQLite database on your device using Android's Room library. This database:</p>
+    <ul>
+      <li>Never leaves your device.</li>
+      <li>Is excluded from Google cloud backup (via <code>android:allowBackup="false"</code> and explicit backup exclusion rules).</li>
+      <li>Can be deleted at any time by clearing app data from Android Settings, or by deleting individual chats within the app.</li>
+    </ul>
+    <p>If you choose to disable chat history in Settings, messages are not saved to the database at all.</p>
+  </section>
+
+  <section>
+    <h2>4. On-Device AI Processing</h2>
+    <p>All AI inference is performed locally on your device using Google MediaPipe and a local Gemma model file. Your messages are processed by the model running on your device's CPU or GPU.</p>
+    <ul>
+      <li>No message content is ever sent to a remote server or AI API.</li>
+      <li>The AI model file itself is stored locally on your device.</li>
+      <li>The app does not have the <code>INTERNET</code> permission and is physically incapable of making network calls.</li>
+    </ul>
+  </section>
+
+  <section>
+    <h2>5. No Internet Access</h2>
+    <p>PocketMind does not declare the <code>android.permission.INTERNET</code> permission in its Android Manifest. The app is technically incapable of sending or receiving any data over a network connection, Wi-Fi, or mobile data.</p>
+  </section>
+
+  <section>
+    <h2>6. Permissions Used</h2>
+    <p>PocketMind uses the following Android system permissions:</p>
+    <ul>
+      <li><strong>VIBRATE</strong> — for optional haptic feedback when sending messages. No data is collected.</li>
+    </ul>
+    <p>No location, camera, microphone, contacts, or storage permissions are requested.</p>
+  </section>
+
+  <section>
+    <h2>7. Third-Party Services</h2>
+    <p>PocketMind uses the following third-party libraries, all running entirely on-device:</p>
+    <ul>
+      <li><strong>Google MediaPipe Tasks GenAI</strong> — for on-device LLM inference. No data is sent to Google.</li>
+      <li><strong>Android Jetpack libraries</strong> (Room, Hilt, Compose) — standard Android architecture components. No telemetry.</li>
+    </ul>
+    <p>No third-party analytics SDKs, advertising SDKs, or crash reporting SDKs are included.</p>
+  </section>
+
+  <section>
+    <h2>8. AI-Generated Content Disclaimer</h2>
+    <p>Responses from PocketMind are generated by a local AI language model (Gemma) and may be inaccurate, incomplete, or inappropriate. Do not rely on PocketMind for:</p>
+    <ul>
+      <li>Medical, legal, or financial decisions</li>
+      <li>Safety-critical information</li>
+      <li>Real-time or current events (the model's knowledge has a cutoff date)</li>
+    </ul>
+    <p>Always verify important information from authoritative sources.</p>
+  </section>
+
+  <section>
+    <h2>9. Children's Privacy</h2>
+    <p>PocketMind is not directed at children under the age of 13. We do not knowingly collect personal information from children. Since no data is collected from any user, this applies equally to all age groups.</p>
+  </section>
+
+  <section>
+    <h2>10. Changes to This Policy</h2>
+    <p>If this privacy policy changes materially, we will update the effective date at the top of this page and post the new version here. Continued use of the app after changes constitutes acceptance of the updated policy.</p>
+  </section>
+
+  <section>
+    <h2>11. Contact Us</h2>
+    <p>Questions about this privacy policy? Reach out at:</p>
+    <p><a href="mailto:harshtiwari493@gmail.com">harshtiwari493@gmail.com</a></p>
+  </section>
+
+</main>
+
+<footer>
+  <p>© 2026 Harsh Tiwari · PocketMind · All rights reserved.</p>
+  <p style="margin-top:6px;">
+    This page can be hosted for free at
+    <strong>https://&lt;your-username&gt;.github.io/pocketmind-privacy</strong> for Play Console.
+  </p>
+</footer>
+
+</body>
+</html>
