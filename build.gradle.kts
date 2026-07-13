@@ -10,4 +10,6 @@ plugins {
     alias(libs.plugins.hilt)                 apply false
     // Play Asset Delivery
     alias(libs.plugins.android.asset.pack)    apply false
+    alias(libs.plugins.android.test)          apply false
+    alias(libs.plugins.baselineprofile)       apply false
 }

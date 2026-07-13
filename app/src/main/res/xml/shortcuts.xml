@@ -2,7 +2,7 @@
 <shortcuts xmlns:android="http://schemas.android.com/apk/res/android">
 
     <!--
-        Static launcher shortcut — appears when the user long-presses the PocketMind icon.
+        Static launcher shortcut — appears when the user long-presses the PocketShadow icon.
         Action NEW_CHAT is intercepted in MainActivity to clear state and start a fresh session.
     -->
     <shortcut
@@ -13,9 +13,9 @@
         android:shortcutLongLabel="@string/shortcut_new_chat_long">
 
         <intent
-            android:action="com.pocketmind.action.NEW_CHAT"
-            android:targetPackage="com.pocketmind"
-            android:targetClass="com.pocketmind.MainActivity" />
+            android:action="com.pocketshadow.app.action.NEW_CHAT"
+            android:targetPackage="com.pocketshadow.app"
+            android:targetClass="com.pocketshadow.app.MainActivity" />
 
         <!-- Categorised as a conversation shortcut for assistant-aware launchers -->
         <categories android:name="android.shortcut.conversation" />

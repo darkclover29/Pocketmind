@@ -9,6 +9,8 @@
 /.idea/assetWizardSettings.xml
 .DS_Store
 /build
+**/build/
+**/src/release/generated/
 /captures
 .externalNativeBuild
 .cxx
@@ -23,5 +25,3 @@ local.properties
 # Root XML Dumps and Kotlin cache
 /*.xml
 .kotlin/
-
-

@@ -49,7 +49,7 @@ GPU is tried first; falls back to CPU automatically.
 - `loadSession()` fixed: was calling `historyRepo.getMessagesForSession()` (DAO-only Flow) — changed to `historyRepo.loadSessionMessages()` (Repository suspend fun returning `List`).
 - Entity field reference fixed: `e.id` → `e.messageId` (matches `ChatMessageEntity` primary key).
 
-### 5. `app/.../ui/screens/PocketMindChatScreen.kt`
+### 5. `app/.../ui/screens/PocketShadowChatScreen.kt`
 - Help text in `ModelInfoSheet` updated from `model.bin` references to `model.litertlm`.
 
 ---

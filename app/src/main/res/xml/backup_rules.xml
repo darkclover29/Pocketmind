@@ -2,6 +2,7 @@
 <!--
     Legacy Auto Backup rules (Android 6–11).
     Exclude all data from Google cloud backup to preserve user privacy.
+    PocketShadow is a fresh install; no migration from prior builds is supported.
 -->
 <full-backup-content>
     <exclude domain="database" path="." />

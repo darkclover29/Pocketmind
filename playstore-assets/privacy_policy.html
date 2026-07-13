@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>PocketMind — Privacy Policy</title>
+  <title>PocketShadow — Privacy Policy</title>
   <style>
     :root {
       --bg:      #0A0A0A;
@@ -96,7 +96,7 @@
 <header>
   <div class="logo-row">
     <div class="logo-circle">🧠</div>
-    <span class="app-name">PocketMind</span>
+    <span class="app-name">PocketShadow</span>
   </div>
   <h1>Privacy Policy</h1>
   <p class="meta">Effective date: June 27, 2026 &nbsp;·&nbsp; Last updated: June 27, 2026</p>
@@ -108,7 +108,7 @@
   <div class="tldr">
     <div class="tldr-title">TL;DR — The Short Version</div>
     <ul>
-      <li>PocketMind collects <strong>zero</strong> personal data.</li>
+      <li>PocketShadow collects <strong>zero</strong> personal data.</li>
       <li>Everything runs on your device. Nothing is sent to any server.</li>
       <li>No analytics, no crash reports, no advertising identifiers.</li>
       <li>No internet permission is declared — the app is physically incapable of network calls.</li>
@@ -117,13 +117,13 @@
 
   <section>
     <h2>1. Who We Are</h2>
-    <p>PocketMind is an on-device AI assistant developed by Harsh Tiwari. The app runs entirely offline on your Android device.</p>
+    <p>PocketShadow is an on-device AI assistant developed by Harsh Tiwari. The app runs entirely offline on your Android device.</p>
     <p>Contact: <a href="mailto:harshtiwari493@gmail.com">harshtiwari493@gmail.com</a></p>
   </section>
 
   <section>
     <h2>2. Data We Collect</h2>
-    <p><strong>We collect no data.</strong> PocketMind does not collect, store remotely, transmit, or share any personal information or usage data. Specifically:</p>
+    <p><strong>We collect no data.</strong> PocketShadow does not collect, store remotely, transmit, or share any personal information or usage data. Specifically:</p>
     <ul>
       <li>No account or sign-in is required.</li>
       <li>No names, email addresses, or identifiers are ever collected.</li>
@@ -146,7 +146,7 @@
 
   <section>
     <h2>4. On-Device AI Processing</h2>
-    <p>All AI inference is performed locally on your device using Google MediaPipe and a local Gemma model file. Your messages are processed by the model running on your device's CPU or GPU.</p>
+    <p>All AI inference is performed locally on your device using Google's LiteRT-LM runtime and a local Gemma model file. Your messages are processed by the model running on your device's CPU or GPU.</p>
     <ul>
       <li>No message content is ever sent to a remote server or AI API.</li>
       <li>The AI model file itself is stored locally on your device.</li>
@@ -156,23 +156,25 @@
 
   <section>
     <h2>5. No Internet Access</h2>
-    <p>PocketMind does not declare the <code>android.permission.INTERNET</code> permission in its Android Manifest. The app is technically incapable of sending or receiving any data over a network connection, Wi-Fi, or mobile data.</p>
+    <p>PocketShadow does not declare the <code>android.permission.INTERNET</code> permission in its Android Manifest. The app is technically incapable of sending or receiving any data over a network connection, Wi-Fi, or mobile data.</p>
   </section>
 
   <section>
     <h2>6. Permissions Used</h2>
-    <p>PocketMind uses the following Android system permissions:</p>
+    <p>PocketShadow uses the following Android system permissions:</p>
     <ul>
       <li><strong>VIBRATE</strong> — for optional haptic feedback when sending messages. No data is collected.</li>
+      <li><strong>RECORD_AUDIO</strong> — only when you choose voice input. Audio is passed to Android's speech recognition service to convert speech into text, and PocketShadow does not record, store, or transmit the audio itself. Depending on your device and recognizer configuration, Android may use an on-device or system-provided recognition service.</li>
     </ul>
-    <p>No location, camera, microphone, contacts, or storage permissions are requested.</p>
+    <p>No location, camera, contacts, or storage permissions are requested.</p>
   </section>
 
   <section>
     <h2>7. Third-Party Services</h2>
-    <p>PocketMind uses the following third-party libraries, all running entirely on-device:</p>
+    <p>PocketShadow uses the following third-party libraries and Android system services:</p>
     <ul>
-      <li><strong>Google MediaPipe Tasks GenAI</strong> — for on-device LLM inference. No data is sent to Google.</li>
+      <li><strong>Google LiteRT-LM</strong> — for on-device LLM inference. No message data is sent to Google by PocketShadow.</li>
+      <li><strong>Android speech recognition</strong> — only when you opt into voice input. The selected system recognizer may process audio according to its own privacy policy.</li>
       <li><strong>Android Jetpack libraries</strong> (Room, Hilt, Compose) — standard Android architecture components. No telemetry.</li>
     </ul>
     <p>No third-party analytics SDKs, advertising SDKs, or crash reporting SDKs are included.</p>
@@ -180,7 +182,7 @@
 
   <section>
     <h2>8. AI-Generated Content Disclaimer</h2>
-    <p>Responses from PocketMind are generated by a local AI language model (Gemma) and may be inaccurate, incomplete, or inappropriate. Do not rely on PocketMind for:</p>
+    <p>Responses from PocketShadow are generated by a local AI language model (Gemma) and may be inaccurate, incomplete, or inappropriate. Do not rely on PocketShadow for:</p>
     <ul>
       <li>Medical, legal, or financial decisions</li>
       <li>Safety-critical information</li>
@@ -191,7 +193,7 @@
 
   <section>
     <h2>9. Children's Privacy</h2>
-    <p>PocketMind is not directed at children under the age of 13. We do not knowingly collect personal information from children. Since no data is collected from any user, this applies equally to all age groups.</p>
+    <p>PocketShadow is not directed at children under the age of 13. We do not knowingly collect personal information from children. Since no data is collected from any user, this applies equally to all age groups.</p>
   </section>
 
   <section>
@@ -208,10 +210,10 @@
 </main>
 
 <footer>
-  <p>© 2026 Harsh Tiwari · PocketMind · All rights reserved.</p>
+  <p>© 2026 Harsh Tiwari · PocketShadow · All rights reserved.</p>
   <p style="margin-top:6px;">
     This page can be hosted for free at
-    <strong>https://&lt;your-username&gt;.github.io/pocketmind-privacy</strong> for Play Console.
+    <strong>https://&lt;your-username&gt;.github.io/PocketShadow-privacy</strong> for Play Console.
   </p>
 </footer>
 

@@ -3,13 +3,25 @@
     xmlns:tools="http://schemas.android.com/tools">
 
     <!--
-        PocketMind is a fully offline, on-device AI assistant.
+        PocketShadow is a fully offline, on-device AI assistant.
         No INTERNET permission is declared — the app cannot make network calls,
         which satisfies Play Store's data safety requirements for "no data shared".
     -->
 
+    <!-- Voice input. Recognition runs in the system recognizer service (we
+         prefer the fully on-device recognizer); the app itself still has no
+         INTERNET permission. -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+
+    <!-- Package visibility (API 30+): required to bind the speech service -->
+    <queries>
+        <intent>
+            <action android:name="android.speech.RecognitionService" />
+        </intent>
+    </queries>
+
     <application
-        android:name=".PocketMindApp"
+        android:name=".PocketShadowApp"
         android:allowBackup="false"
         android:dataExtractionRules="@xml/data_extraction_rules"
         android:fullBackupContent="@xml/backup_rules"
@@ -18,7 +30,7 @@
         android:label="@string/app_name"
         android:roundIcon="@mipmap/ic_launcher_round"
         android:supportsRtl="true"
-        android:theme="@style/Theme.PocketMind"
+        android:theme="@style/Theme.PocketShadow"
         android:enableOnBackInvokedCallback="true"
         android:largeHeap="true"
         tools:targetApi="35">
@@ -37,7 +49,7 @@
         <activity
             android:name=".MainActivity"
             android:exported="true"
-            android:theme="@style/Theme.PocketMind.Splash"
+            android:theme="@style/Theme.PocketShadow.Splash"
             android:windowSoftInputMode="adjustResize"
             android:screenOrientation="portrait">
             <intent-filter>

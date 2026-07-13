@@ -19,8 +19,9 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "PocketMind"
+rootProject.name = "PocketShadow"
 include(":app")
 include(":model_pack")
+include(":baselineprofile")
 
  

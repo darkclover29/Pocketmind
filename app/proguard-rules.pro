@@ -1,4 +1,4 @@
-# ── PocketMind ProGuard / R8 rules ────────────────────────────────────────────
+# ── PocketShadow ProGuard / R8 rules ────────────────────────────────────────
 # Applied for: release builds (minifyEnabled = true)
 
 # Preserve stack trace line numbers for crash reports
@@ -63,6 +63,14 @@
 }
 -dontwarn com.google.mediapipe.**
 
+# ── LiteRT-LM (On-device LLM Inference) ───────────────────────────────────────
+-keep class com.google.ai.edge.litertlm.** { *; }
+-keepclassmembers class com.google.ai.edge.litertlm.** {
+    *;
+}
+-dontwarn com.google.ai.edge.litertlm.**
+
+
 # ── Jetpack Compose ───────────────────────────────────────────────────────────
 -keep class androidx.compose.** { *; }
 -keepclassmembers class androidx.compose.** { *; }
@@ -76,13 +84,13 @@
 -keepclassmembers class androidx.lifecycle.** { *; }
 
 # ── Data classes (Room entities, UI state) ────────────────────────────────────
--keepclassmembers class com.pocketmind.data.** {
+-keepclassmembers class com.pocketshadow.app.data.** {
     *;
 }
--keepclassmembers class com.pocketmind.ui.viewmodel.** {
+-keepclassmembers class com.pocketshadow.app.ui.viewmodel.** {
     *;
 }
--keepclassmembers class com.pocketmind.ui.components.** {
+-keepclassmembers class com.pocketshadow.app.ui.components.** {
     *;
 }
 

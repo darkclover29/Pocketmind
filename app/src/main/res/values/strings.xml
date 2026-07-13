@@ -1,5 +1,5 @@
 <resources>
-    <string name="app_name">PocketMind</string>
+    <string name="app_name">PocketShadow</string>
     <!-- Launcher shortcut labels (10 / 25 char limits) -->
     <string name="shortcut_new_chat_short">New Chat</string>
     <string name="shortcut_new_chat_long">Start a New Chat</string>
