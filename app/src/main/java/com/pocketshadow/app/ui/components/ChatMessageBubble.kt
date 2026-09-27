@@ -27,6 +27,7 @@ import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.AnnotatedString
@@ -69,8 +70,8 @@ data class Message(
 
 // ── Bubble ────────────────────────────────────────────────────────────────────
 
-private val CORNER_FULL  = 22.dp
-private val CORNER_SHARP = 8.dp
+private val CORNER_FULL  = 18.dp
+private val CORNER_SHARP = 7.dp
 
 private val DATE_FMT = SimpleDateFormat("h:mm a", Locale.getDefault())
 
@@ -150,6 +151,7 @@ fun ChatMessageBubble(
 ) {
     val isUser           = message.role == Role.USER
     val clipboardManager = LocalClipboardManager.current
+    val context          = LocalContext.current
     val haptic           = LocalHapticFeedback.current
     var showContextMenu  by remember { mutableStateOf(false) }
     var showCopiedHint   by remember { mutableStateOf(false) }
@@ -157,7 +159,29 @@ fun ChatMessageBubble(
     var showMeta         by remember { mutableStateOf(false) }
 
     LaunchedEffect(showCopiedHint) {
-        if (showCopiedHint) { kotlinx.coroutines.delay(1500); showCopiedHint = false }
+        if (showCopiedHint) {
+            if (hapticEnabled) {
+                val vibrator = if (android.os.Build.VERSION.SDK_INT >= 31) {
+                    (context.getSystemService(android.content.Context.VIBRATOR_MANAGER_SERVICE)
+                        as? android.os.VibratorManager)?.defaultVibrator
+                } else {
+                    @Suppress("DEPRECATION")
+                    context.getSystemService(android.content.Context.VIBRATOR_SERVICE) as? android.os.Vibrator
+                }
+                if (vibrator?.hasVibrator() == true) {
+                    if (android.os.Build.VERSION.SDK_INT >= 26) {
+                        vibrator.vibrate(android.os.VibrationEffect.createOneShot(18L, android.os.VibrationEffect.DEFAULT_AMPLITUDE))
+                    } else {
+                        @Suppress("DEPRECATION")
+                        vibrator.vibrate(18L)
+                    }
+                } else {
+                    haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                }
+            }
+            kotlinx.coroutines.delay(1500)
+            showCopiedHint = false
+        }
     }
 
     val shape = RoundedCornerShape(
@@ -220,7 +244,7 @@ fun ChatMessageBubble(
                             showContextMenu = true
                         }
                     )
-                    .padding(horizontal = 16.dp, vertical = 11.dp)
+            .padding(horizontal = 16.dp, vertical = 12.dp)
             ) {
                 Column {
                     if (isUser) {
@@ -253,7 +277,7 @@ fun ChatMessageBubble(
                         ) {
                             if (!isUser && message.statsLine != null) {
                                 Text(
-                                    text  = "⚡ ${message.statsLine}",
+                                    text  = "Speed · ${message.statsLine}",
                                     style = MaterialTheme.typography.labelSmall.copy(
                                         fontSize = 9.sp,
                                         color    = MaterialTheme.colorScheme.onSurfaceVariant
@@ -390,6 +414,9 @@ fun ChatMessageBubble(
                 if (onRegenerate != null) {
                     BubbleActionIcon(Icons.Rounded.Refresh, "Regenerate response", onRegenerate)
                 }
+                if (onRetry != null && !message.isStreaming) {
+                    BubbleActionIcon(Icons.Rounded.Refresh, "Retry response", onRetry)
+                }
                 if (onReadAloud != null) {
                     BubbleActionIcon(Icons.Rounded.VolumeUp, "Read aloud", onReadAloud)
                 }
@@ -398,7 +425,12 @@ fun ChatMessageBubble(
         } // wrapper Column
 
         // Floating "Copied" chip
-        if (showCopiedHint) {
+        androidx.compose.animation.AnimatedVisibility(
+            visible = showCopiedHint,
+            enter = androidx.compose.animation.fadeIn(androidx.compose.animation.core.tween(PocketShadowMotion.microMs)) +
+                    androidx.compose.animation.scaleIn(androidx.compose.animation.core.tween(PocketShadowMotion.microMs), initialScale = 0.85f),
+            exit = androidx.compose.animation.fadeOut(androidx.compose.animation.core.tween(PocketShadowMotion.exitMs))
+        ) {
             Spacer(Modifier.width(6.dp))
             Box(
                 modifier = Modifier

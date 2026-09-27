@@ -1,6 +1,7 @@
 package com.pocketshadow.app.ui.screens
 
 import androidx.compose.animation.core.*
+import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
@@ -8,6 +9,9 @@ import androidx.compose.foundation.background
 import com.pocketshadow.app.BuildConfig
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.indication
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.foundation.rememberScrollState
@@ -20,6 +24,7 @@ import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.ui.draw.scale
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -35,7 +40,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
@@ -83,7 +90,7 @@ private fun Set<Voice>.toVoiceOptions(): List<VoiceOption> {
         .values
         .sortedWith(compareByDescending<Voice> { it.quality }
             .thenBy { it.locale.displayCountry })
-    return listOf(VoiceOption("", "System Default")) + best.map { v ->
+    return listOf(VoiceOption("", "On-device default")) + best.map { v ->
         val country = v.locale.displayCountry.let { if (it.isNotBlank()) " ($it)" else "" }
         VoiceOption(name = v.name, label = "English$country")
     }
@@ -133,12 +140,18 @@ fun PocketShadowChatScreen(
     val scope       = rememberCoroutineScope()
     val drawerState = rememberDrawerState(DrawerValue.Closed)
     val context     = LocalContext.current
+    val wideLayout  = LocalConfiguration.current.screenWidthDp >= 840
     val haptic      = LocalHapticFeedback.current
     var showModelPickerDialog by remember { mutableStateOf(false) }
     var showExportDialog by remember { mutableStateOf(false) }
     var showImportDialog by remember { mutableStateOf(false) }
     var pendingExportPassphrase by remember { mutableStateOf("") }
     var pendingImportUri by remember { mutableStateOf<String?>(null) }
+    var selectedTemplate by remember { mutableStateOf<PromptTemplate?>(null) }
+    val soundEffects = remember { PocketShadowSoundEffects() }
+    DisposableEffect(Unit) {
+        onDispose { soundEffects.close() }
+    }
 
     val exportArchiveLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
         ActivityResultContracts.CreateDocument("application/json")
@@ -172,21 +185,28 @@ fun PocketShadowChatScreen(
         }
     }
 
-    // Semantic haptics: CONFIRM for send (API 30+; falls back to VIRTUAL_KEY),
-    // CONTEXT_CLICK for minor actions — LongPress-for-everything feels wrong.
+    // Let Android choose vibration strength and respect the device's haptic setting.
     val view = androidx.compose.ui.platform.LocalView.current
+    fun performPocketHaptic(constant: Int, previewWhenEnabling: Boolean = false) {
+        if (uiState.hapticFeedback || previewWhenEnabling) view.performHapticFeedback(constant)
+    }
     val confirmHaptic: () -> Unit = {
-        if (uiState.hapticFeedback) {
-            view.performHapticFeedback(
-                if (android.os.Build.VERSION.SDK_INT >= 30) android.view.HapticFeedbackConstants.CONFIRM
-                else android.view.HapticFeedbackConstants.VIRTUAL_KEY
-            )
+        if (uiState.soundEffects) soundEffects.send()
+        performPocketHaptic(
+            if (android.os.Build.VERSION.SDK_INT >= 30) android.view.HapticFeedbackConstants.CONFIRM
+            else android.view.HapticFeedbackConstants.VIRTUAL_KEY
+        )
+    }
+
+    var generationWasActive by remember { mutableStateOf(false) }
+    LaunchedEffect(uiState.isGenerating) {
+        if (generationWasActive && !uiState.isGenerating && uiState.messages.lastOrNull()?.role == Role.AI) {
+            if (uiState.soundEffects) soundEffects.complete()
         }
+        generationWasActive = uiState.isGenerating
     }
     val tickHaptic: () -> Unit = {
-        if (uiState.hapticFeedback) {
-            view.performHapticFeedback(android.view.HapticFeedbackConstants.CONTEXT_CLICK)
-        }
+        performPocketHaptic(android.view.HapticFeedbackConstants.VIRTUAL_KEY)
     }
 
     // Composer focus — prompt cards and "Edit message" put text in the input;
@@ -219,7 +239,10 @@ fun PocketShadowChatScreen(
         androidx.activity.result.contract.ActivityResultContracts.RequestPermission()
     ) { granted -> if (granted) startDictation() }
     val onMicClick: () -> Unit = {
-        if (voiceInput.isListening) {
+        if (!voiceInput.isAvailable) {
+            Toast.makeText(context, "On-device dictation is unavailable. Please type your message; cloud dictation is disabled.", Toast.LENGTH_LONG).show()
+        } else if (voiceInput.isListening) {
+            tickHaptic()
             voiceInput.stop()
         } else {
             tickHaptic()
@@ -229,6 +252,10 @@ fun PocketShadowChatScreen(
             if (granted) startDictation()
             else micPermissionLauncher.launch(android.Manifest.permission.RECORD_AUDIO)
         }
+    }
+
+    LaunchedEffect(voiceInput.errorMessage) {
+        voiceInput.errorMessage?.let { Toast.makeText(context, it, Toast.LENGTH_LONG).show() }
     }
 
     // ── Text-to-Speech ────────────────────────────────────────────────────────
@@ -297,9 +324,23 @@ fun PocketShadowChatScreen(
         }
     }
 
+    // Even a system-default voice may require a network. Gate every speech call.
+    fun selectOfflineVoice(engine: TextToSpeech): Boolean {
+        val current = engine.voice
+        val offline = current?.takeUnless { it.isNetworkConnectionRequired }
+            ?: engine.voices?.filter { !it.isNetworkConnectionRequired &&
+                it.locale.language == (current?.locale?.language ?: Locale.getDefault().language) }
+                ?.maxByOrNull { it.quality }
+        if (offline == null || engine.setVoice(offline) == TextToSpeech.ERROR) {
+            Toast.makeText(context, "No on-device voice is available. Install an offline voice in device settings to read aloud.", Toast.LENGTH_LONG).show()
+            return false
+        }
+        return true
+    }
+
     // Strips markdown + emoji then speaks — no asterisks, no "fire emoji" aloud
     val readAloud: (String) -> Unit = { raw ->
-        if (ttsReady.value) {
+        if (ttsReady.value && tts.value?.let { selectOfflineVoice(it) } == true) {
             isTtsSpeaking.value = true
             tts.value?.speak(
                 raw.stripForTts(),
@@ -339,6 +380,7 @@ fun PocketShadowChatScreen(
                     else -> java.util.Locale.getDefault()
                 }
                 try { engine.language = locale } catch (_: Exception) {}
+                if (!selectOfflineVoice(engine)) return@playPreview
                 previewPlayingAccent.value = code
                 engine.speak(
                     "Hi, I'm PocketShadow — your private, on-device assistant.",
@@ -351,11 +393,16 @@ fun PocketShadowChatScreen(
         }
     }
 
-    val fontScale = when (uiState.fontSize) {
+    val targetFontScale = when (uiState.fontSize) {
         FontScale.SMALL  -> 0.88f
         FontScale.NORMAL -> 1.00f
         FontScale.LARGE  -> 1.18f
     }
+    val fontScale by animateFloatAsState(
+        targetValue = targetFontScale,
+        animationSpec = tween(durationMillis = 220),
+        label = "app_text_size"
+    )
 
     // Scroll when a new committed message arrives
     LaunchedEffect(uiState.messages.size) {
@@ -411,6 +458,7 @@ fun PocketShadowChatScreen(
                     },
                     onClearSearch   = viewModel::clearSearch,
                     onSessionClick  = { session ->
+                        tickHaptic()
                         viewModel.loadSession(session)
                         scope.launch { drawerState.close() }
                     },
@@ -419,6 +467,7 @@ fun PocketShadowChatScreen(
                         viewModel.renameSession(session.sessionId, newTitle)
                     },
                     onNewChat       = {
+                        tickHaptic()
                         viewModel.newChat()
                         scope.launch { drawerState.close() }
                     }
@@ -434,9 +483,9 @@ fun PocketShadowChatScreen(
                         isGenerating  = uiState.isGenerating,
                         isTtsSpeaking = isTtsSpeaking.value,
                         onStopTts     = stopSpeaking,
-                        onDrawerClick = { scope.launch { drawerState.open() } },
-                        onNewChat     = { viewModel.newChat() },
-                        onSettings    = { viewModel.showSettings() },
+                        onDrawerClick = { tickHaptic(); scope.launch { drawerState.open() } },
+                        onNewChat     = { tickHaptic(); viewModel.newChat() },
+                        onSettings    = { tickHaptic(); viewModel.showSettings() },
                         onModelInfo   = { viewModel.showModelInfo() }
                     )
                 },
@@ -450,41 +499,54 @@ fun PocketShadowChatScreen(
                             confirmHaptic()
                             viewModel.sendMessage()
                         },
-                        onStop         = viewModel::stopGeneration,
+                        onStop         = { tickHaptic(); viewModel.stopGeneration() },
                         documentActive = uiState.documentContext != null,
+                        documentName   = uiState.documentName,
                         documentWords  = remember(uiState.documentContext) {
                             uiState.documentContext?.trim()
                                 ?.split(Regex("\\s+"))?.size ?: 0
                         },
-                        onDocumentClear = viewModel::clearDocumentContext,
-                        onDocumentClick = viewModel::showDocumentSheet,
+                        onDocumentClear = { tickHaptic(); viewModel.clearDocumentContext() },
+                        onDocumentClick = { tickHaptic(); viewModel.showDocumentSheet() },
                         isEmpty         = uiState.messages.isEmpty(),
                         inputHistory    = uiState.inputHistory,
                         focusRequester  = inputFocusRequester,
-                        voiceAvailable  = voiceInput.isAvailable,
+                        voiceAvailable  = true,
                         isListening     = voiceInput.isListening,
                         onMicClick      = onMicClick
                     )
                 }
             ) { padding ->
-                Column(Modifier.fillMaxSize().padding(padding)) {
+                Box(
+                    modifier = Modifier.fillMaxSize().padding(padding),
+                    contentAlignment = Alignment.TopCenter
+                ) {
+                Column(
+                    modifier = (if (wideLayout) Modifier.widthIn(max = 1080.dp)
+                                else Modifier.fillMaxWidth()).fillMaxHeight()
+                ) {
                 // Slim status strip: engine load takes seconds — without this the
                 // first send just feels frozen.
-                ModelStatusBanner(modelInfo = uiState.modelInfo)
+                ModelStatusBanner(
+                    modelInfo = uiState.modelInfo,
+                    onRetry = viewModel::retryModelLoading,
+                    onChooseModel = { showModelPickerDialog = true },
+                    onShowGuidance = viewModel::showModelInfo
+                )
 
                 if (uiState.messages.isEmpty() && !uiState.isGenerating) {
                     EmptyState(
-                        models          = uiState.availableModels,
-                        selectedPath    = uiState.selectedModelPath,
+                        modelInfo       = uiState.modelInfo,
                         sessions        = uiState.sessions,
                         modifier        = Modifier.fillMaxWidth().weight(1f),
                         onPrompt        = { prompt ->
                             viewModel.onInputChanged(prompt)
                             focusComposer()
                         },
+                        onTemplate      = { tickHaptic(); selectedTemplate = it },
                         onModelClick    = { showModelPickerDialog = true },
-                        onDocumentClick = viewModel::showDocumentSheet,
-                        onSessionClick  = { session -> viewModel.loadSession(session) }
+                        onDocumentClick = { tickHaptic(); viewModel.showDocumentSheet() },
+                        onSessionClick  = { session -> tickHaptic(); viewModel.loadSession(session) }
                     )
                 } else {
                     Box(Modifier.fillMaxWidth().weight(1f)) {
@@ -499,6 +561,18 @@ fun PocketShadowChatScreen(
                             // slots separately — less re-layout when scrolling.
                             val lastAiId = uiState.messages.lastOrNull { it.role == Role.AI }?.id
                             items(uiState.messages, key = { it.id }, contentType = { it.role }) { msg ->
+                                androidx.compose.animation.AnimatedVisibility(
+                                    visible = true,
+                                    enter = androidx.compose.animation.fadeIn(
+                                        animationSpec = androidx.compose.animation.core.tween(PocketShadowMotion.enterMs)
+                                    ) + androidx.compose.animation.slideInVertically(
+                                        animationSpec = androidx.compose.animation.core.tween(PocketShadowMotion.enterMs),
+                                        initialOffsetY = { it / 8 }
+                                    ),
+                                    exit = androidx.compose.animation.fadeOut(
+                                        animationSpec = androidx.compose.animation.core.tween(PocketShadowMotion.exitMs)
+                                    )
+                                ) {
                                 ChatMessageBubble(
                                     message       = msg,
                                     modifier      = Modifier.animateItem(
@@ -529,6 +603,7 @@ fun PocketShadowChatScreen(
                                                           focusComposer()
                                                       }) else null
                                 )
+                                }
                             }
                             if (uiState.streamingId != null) {
                                 item(key = "streaming_bubble") {
@@ -584,29 +659,53 @@ fun PocketShadowChatScreen(
                     }
                 }
                 } // content Column
+                } // centered tablet/foldable content Box
             }
+        }
+
+        selectedTemplate?.let { template ->
+            PromptTemplateSheet(
+                template = template,
+                onDismiss = { selectedTemplate = null },
+                onUse = { prompt ->
+                    viewModel.onInputChanged(prompt)
+                    selectedTemplate = null
+                    focusComposer()
+                }
+            )
         }
 
         if (uiState.showSettings) {
             SettingsBottomSheet(
-                uiState               = uiState,
-                onThemeMode           = viewModel::setThemeMode,
-                onFontSize            = viewModel::setFontSize,
-                onHapticFeedback      = viewModel::setHapticFeedback,
-                onAutoScroll          = viewModel::setAutoScroll,
-                onSaveHistory         = viewModel::setSaveHistory,
+                        uiState               = uiState,
+                        onThemeMode           = {
+                            if (it != uiState.themeMode) { tickHaptic(); viewModel.setThemeMode(it) }
+                        },
+                        onFontSize            = {
+                            if (it != uiState.fontSize) { tickHaptic(); viewModel.setFontSize(it) }
+                        },
+                        onHapticFeedback      = {
+                            if (it) performPocketHaptic(
+                                android.view.HapticFeedbackConstants.VIRTUAL_KEY,
+                                previewWhenEnabling = true
+                            )
+                            viewModel.setHapticFeedback(it)
+                        },
+                        onSoundEffects        = { tickHaptic(); viewModel.setSoundEffects(it) },
+                onAutoScroll          = { tickHaptic(); viewModel.setAutoScroll(it) },
+                onSaveHistory         = { tickHaptic(); viewModel.setSaveHistory(it) },
                 onContextWindowSize   = viewModel::setContextWindowSize,
                 onCustomSystemPrompt  = viewModel::setCustomSystemPrompt,
                 onModelInfo           = viewModel::showModelInfo,
                 availableVoices       = availableVoices.value,
-                onTtsVoice            = viewModel::setTtsVoiceName,
+                onTtsVoice            = { tickHaptic(); viewModel.setTtsVoiceName(it) },
                 ttsAccent             = uiState.ttsAccent,
-                onTtsAccent           = viewModel::setTtsAccent,
+                onTtsAccent           = { tickHaptic(); viewModel.setTtsAccent(it) },
                 onTtsSpeechRate       = viewModel::setTtsSpeechRate,
                 onTtsPitch            = viewModel::setTtsPitch,
                 previewPlayingAccent  = previewPlayingAccent.value,
                 onPlayPreview         = playPreview,
-                onSelectModel         = viewModel::setSelectedModel,
+                onSelectModel         = { tickHaptic(); viewModel.setSelectedModel(it) },
                 onExportChats         = { showExportDialog = true },
                 onImportChats         = { importArchiveLauncher.launch(arrayOf("application/json", "text/*", "*/*")) },
                 onRateApp              = mainViewModel::requestReview,
@@ -630,7 +729,11 @@ fun PocketShadowChatScreen(
         }
 
         if (uiState.showDocumentSheet) {
+            val excerpts by viewModel.documentExcerpts.collectAsStateWithLifecycle()
             DocumentSheet(
+                initialText = uiState.documentContext.orEmpty(),
+                initialName = uiState.documentName,
+                excerpts = excerpts,
                 onConfirm = viewModel::setDocumentContext,
                 onDismiss = viewModel::dismissDocumentSheet
             )
@@ -818,36 +921,23 @@ private fun HistoryDrawer(
 ) {
     ModalDrawerSheet(
         drawerContainerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
-        modifier             = Modifier.width(300.dp)
+        modifier             = Modifier.width(320.dp)
     ) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 20.dp, vertical = 20.dp),
+                .padding(start = 20.dp, end = 12.dp, top = 20.dp, bottom = 16.dp),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment     = Alignment.CenterVertically
         ) {
-            Row(
-                verticalAlignment     = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(10.dp)
-            ) {
-                PocketShadowLogoMark(size = 32f)
-                Column {
-                    Text("PocketShadow", style = MaterialTheme.typography.titleMedium)
-                    Text(
-                        "Chat History",
-                        style = MaterialTheme.typography.bodySmall.copy(
-                            color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    )
-                }
-            }
-            FilledIconButton(
+            Text("Chat History", style = MaterialTheme.typography.titleLarge.copy(
+                fontWeight = FontWeight.SemiBold))
+            IconButton(
                 onClick  = onNewChat,
-                colors   = IconButtonDefaults.filledIconButtonColors(
-                    containerColor = ElectricViolet, contentColor = White),
-                modifier = Modifier.size(36.dp)
+                modifier = Modifier.size(48.dp)
             ) {
-                Icon(Icons.Rounded.Add, "New Chat", modifier = Modifier.size(18.dp))
+                Icon(Icons.Rounded.Add, "New Chat", tint = ElectricViolet,
+                    modifier = Modifier.size(24.dp))
             }
         }
 
@@ -871,18 +961,21 @@ private fun HistoryDrawer(
                 }
             },
             singleLine   = true,
-            shape        = RoundedCornerShape(28.dp),
+            shape        = RoundedCornerShape(14.dp),
             modifier     = Modifier
                 .fillMaxWidth()
                 .padding(horizontal = 16.dp, vertical = 4.dp),
             textStyle    = MaterialTheme.typography.bodyMedium,
             colors       = OutlinedTextFieldDefaults.colors(
                 focusedBorderColor   = ElectricViolet,
-                unfocusedBorderColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.5f)
+                unfocusedBorderColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.45f),
+                focusedContainerColor = MaterialTheme.colorScheme.surfaceContainer,
+                unfocusedContainerColor = MaterialTheme.colorScheme.surfaceContainer
             )
         )
 
-        HorizontalDivider(color = MaterialTheme.colorScheme.outline, thickness = 0.5.dp)
+        Spacer(Modifier.height(12.dp))
+        HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.35f), thickness = 0.5.dp)
         Spacer(Modifier.height(8.dp))
 
         // ── Search results or session list ──────────────────────────────────────
@@ -914,12 +1007,12 @@ private fun HistoryDrawer(
                 }
             }
         } else if (sessions.isEmpty()) {
-            Box(Modifier.fillMaxWidth().padding(vertical = 48.dp), Alignment.Center) {
-                Text(
-                    "No conversations yet",
-                    style = MaterialTheme.typography.bodySmall.copy(
-                        color = MaterialTheme.colorScheme.onSurfaceVariant)
-                )
+            Column(Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 40.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Text("No conversations yet", style = MaterialTheme.typography.bodyMedium)
+                Text("Your chats will appear here.", style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         } else {
             LazyColumn(contentPadding = PaddingValues(bottom = 16.dp)) {
@@ -1107,22 +1200,29 @@ private fun SessionItem(
 
     SwipeToDismissBox(
         state = dismissState,
+        modifier = Modifier.padding(horizontal = 12.dp, vertical = 2.dp),
         enableDismissFromStartToEnd = false,
         backgroundContent = {
             Box(
                 Modifier
                     .fillMaxSize()
-                    .background(MaterialTheme.colorScheme.error.copy(alpha = 0.15f))
-                    .padding(end = 20.dp),
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(if (dismissState.targetValue == SwipeToDismissBoxValue.EndToStart)
+                        MaterialTheme.colorScheme.error.copy(alpha = 0.16f)
+                        else MaterialTheme.colorScheme.surfaceContainerHigh)
+                    .padding(end = 16.dp),
                 Alignment.CenterEnd
             ) {
-                Icon(Icons.Rounded.Delete, "Delete",
-                    tint     = MaterialTheme.colorScheme.error,
-                    modifier = Modifier.size(20.dp))
+                if (dismissState.targetValue == SwipeToDismissBoxValue.EndToStart) {
+                    Icon(Icons.Rounded.Delete, "Delete",
+                        tint = MaterialTheme.colorScheme.error,
+                        modifier = Modifier.size(20.dp))
+                }
             }
         }
     ) {
         Surface(
+            shape    = RoundedCornerShape(12.dp),
             color    = MaterialTheme.colorScheme.surfaceContainerHigh,
             modifier = Modifier
                 .fillMaxWidth()
@@ -1140,8 +1240,8 @@ private fun SessionItem(
             Row(
                 Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 20.dp, vertical = 12.dp),
-                horizontalArrangement = Arrangement.SpaceBetween,
+                    .padding(start = 16.dp, end = 4.dp, top = 8.dp, bottom = 8.dp),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
                 verticalAlignment     = Alignment.CenterVertically
             ) {
                 Column(Modifier.weight(1f)) {
@@ -1153,14 +1253,21 @@ private fun SessionItem(
                     Text(
                         formatSessionDate(session.createdAt),
                         style = MaterialTheme.typography.bodySmall.copy(
-                            color    = MaterialTheme.colorScheme.onSurfaceVariant,
-                            fontSize = 10.sp)
+                            color = MaterialTheme.colorScheme.onSurfaceVariant)
                     )
                 }
-                // Rename hint icon — shows the user long-press is available
-                Icon(Icons.Rounded.Edit, "Rename",
-                    tint     = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.3f),
-                    modifier = Modifier.size(14.dp))
+                IconButton(
+                    onClick = {
+                        if (hapticEnabled) haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                        renameText = session.title
+                        showRenameDialog = true
+                    },
+                    modifier = Modifier.size(48.dp)
+                ) {
+                    Icon(Icons.Rounded.Edit, "Rename conversation",
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.size(18.dp))
+                }
             }
         }
     }
@@ -1192,6 +1299,17 @@ private fun ChatTopBar(
     onModelInfo  : () -> Unit = {}
 ) {
     var showMenu by remember { mutableStateOf(false) }
+    var elapsedSeconds by remember { mutableIntStateOf(0) }
+
+    LaunchedEffect(isGenerating) {
+        elapsedSeconds = 0
+        if (isGenerating) {
+            while (true) {
+                kotlinx.coroutines.delay(1_000)
+                elapsedSeconds++
+            }
+        }
+    }
 
     TopAppBar(
         navigationIcon = {
@@ -1229,6 +1347,13 @@ private fun ChatTopBar(
                         .background(ElectricViolet.copy(alpha = alpha))
                 )
                 Spacer(Modifier.width(6.dp))
+                Text(
+                    "Generating · ${elapsedSeconds}s",
+                    style = MaterialTheme.typography.labelSmall.copy(
+                        color = ElectricViolet,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                )
             }
             if (isTtsSpeaking) {
                 IconButton(onClick = onStopTts) {
@@ -1327,7 +1452,12 @@ private fun ChatTopBar(
 // ── Empty state ───────────────────────────────────────────────────────────────
 
 @Composable
-private fun ModelStatusBanner(modelInfo: ModelInfo) {
+private fun ModelStatusBanner(
+    modelInfo: ModelInfo,
+    onRetry: () -> Unit = {},
+    onChooseModel: () -> Unit = {},
+    onShowGuidance: () -> Unit = {}
+) {
     androidx.compose.animation.AnimatedVisibility(visible = !modelInfo.isReady) {
         val status    = modelInfo.statusText
         val isWorking = status == "Not initialized" ||
@@ -1396,6 +1526,40 @@ private fun ModelStatusBanner(modelInfo: ModelInfo) {
                         color = ElectricViolet,
                         trackColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.18f)
                     )
+                } else {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        OutlinedButton(
+                            onClick = onRetry,
+                            modifier = Modifier.weight(1f),
+                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
+                            shape = RoundedCornerShape(10.dp)
+                        ) {
+                            Icon(Icons.Rounded.Refresh, null, modifier = Modifier.size(16.dp))
+                            Spacer(Modifier.width(4.dp))
+                            Text("Retry", maxLines = 1)
+                        }
+                        OutlinedButton(
+                            onClick = onChooseModel,
+                            modifier = Modifier.weight(1f),
+                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
+                            shape = RoundedCornerShape(10.dp)
+                        ) {
+                            Icon(Icons.Rounded.Memory, null, modifier = Modifier.size(16.dp))
+                            Spacer(Modifier.width(4.dp))
+                            Text("Choose model", maxLines = 1)
+                        }
+                    }
+                    TextButton(
+                        onClick = onShowGuidance,
+                        contentPadding = PaddingValues(horizontal = 0.dp, vertical = 0.dp)
+                    ) {
+                        Icon(Icons.Rounded.Info, null, modifier = Modifier.size(16.dp))
+                        Spacer(Modifier.width(4.dp))
+                        Text("Storage & RAM help")
+                    }
                 }
             }
         }
@@ -1404,245 +1568,191 @@ private fun ModelStatusBanner(modelInfo: ModelInfo) {
 
 @Composable
 private fun EmptyState(
-    models          : List<ModelFile>,
-    selectedPath    : String,
-    sessions        : List<ChatSessionEntity>,
-    modifier        : Modifier = Modifier,
-    onPrompt        : (String) -> Unit = {},
-    onModelClick    : () -> Unit = {},
-    onDocumentClick : () -> Unit = {},
-    onSessionClick  : (ChatSessionEntity) -> Unit = {}
+    modelInfo: ModelInfo,
+    sessions: List<ChatSessionEntity>,
+    modifier: Modifier = Modifier,
+    onPrompt: (String) -> Unit = {},
+    onTemplate: (PromptTemplate) -> Unit = {},
+    onModelClick: () -> Unit = {},
+    onDocumentClick: () -> Unit = {},
+    onSessionClick: (ChatSessionEntity) -> Unit = {}
 ) {
-    val subtitle = "Your private, on-device AI. Fully local, fully secure."
-
-    Box(
-        modifier = modifier.fillMaxSize(),
-        contentAlignment = Alignment.Center
+    var showAllTemplates by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(false) }
+    val featured = promptTemplates.take(4)
+    Column(
+        modifier = modifier.verticalScroll(rememberScrollState())
+            .padding(horizontal = 20.dp, vertical = 14.dp),
+        verticalArrangement = Arrangement.spacedBy(22.dp)
     ) {
-        Column(
-            horizontalAlignment = Alignment.CenterHorizontally,
-            modifier            = Modifier
-                .fillMaxWidth()
-                .verticalScroll(androidx.compose.foundation.rememberScrollState())
-                .padding(horizontal = 24.dp, vertical = 20.dp),
-            verticalArrangement = Arrangement.spacedBy(20.dp)
+        Surface(
+            shape = RoundedCornerShape(28.dp),
+            color = MaterialTheme.colorScheme.surfaceContainer,
+            border = androidx.compose.foundation.BorderStroke(1.dp, ElectricViolet.copy(alpha = 0.34f)),
+            modifier = Modifier.fillMaxWidth()
         ) {
-            Spacer(Modifier.height(16.dp))
-
-            // Logo & Greeting Header
-            Column(
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                PocketShadowLogoMark(size = 72f)
-                Text(
-                    text = "PocketShadow",
-                    style = MaterialTheme.typography.headlineMedium.copy(fontWeight = FontWeight.Bold)
-                )
-                Text(
-                    text = subtitle,
-                    style = MaterialTheme.typography.bodyMedium.copy(
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    ),
-                    textAlign = androidx.compose.ui.text.style.TextAlign.Center
-                )
-
-                // Active Model Pill Badge
-                val currentName = models.firstOrNull { it.path == selectedPath }?.displayName
-                    ?: if (selectedPath.isBlank()) "Auto-detect Model" else "Unknown Model"
-
-                Surface(
-                    onClick = onModelClick,
-                    shape   = RoundedCornerShape(50),
-                    color   = VioletGlow.copy(alpha = 0.5f),
-                    border  = androidx.compose.foundation.BorderStroke(
-                        0.5.dp, ElectricViolet.copy(alpha = 0.3f)
-                    ),
-                    modifier = Modifier.padding(top = 8.dp)
-                ) {
-                    Row(
-                        verticalAlignment     = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(6.dp),
-                        modifier              = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Rounded.Memory,
-                            contentDescription = null,
-                            tint = ElectricViolet,
-                            modifier = Modifier.size(14.dp)
-                        )
-                        Text(
-                            text = currentName,
-                            style = MaterialTheme.typography.labelSmall.copy(
-                                color = ElectricViolet,
-                                fontWeight = FontWeight.Bold
-                            )
-                        )
+            Box {
+                Box(Modifier.matchParentSize().background(androidx.compose.ui.graphics.Brush.linearGradient(
+                    listOf(ElectricViolet.copy(alpha = 0.26f),
+                        ElectricViolet.copy(alpha = 0.09f),
+                        MaterialTheme.colorScheme.surfaceContainer)
+                )))
+                Column(Modifier.padding(22.dp), verticalArrangement = Arrangement.spacedBy(15.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        Surface(shape = RoundedCornerShape(18.dp),
+                            color = ElectricViolet.copy(alpha = 0.17f),
+                            border = androidx.compose.foundation.BorderStroke(
+                                1.dp, ElectricViolet.copy(alpha = 0.25f))) {
+                            PocketShadowLogoMark(Modifier.padding(9.dp), size = 43f)
+                        }
+                        Column {
+                            Text("POCKETSHADOW", style = MaterialTheme.typography.labelSmall.copy(
+                                color = ElectricViolet, fontWeight = FontWeight.ExtraBold,
+                                letterSpacing = 1.5.sp))
+                            Text(if (modelInfo.isReady) "Private AI · Ready" else "Private AI · On your phone",
+                                style = MaterialTheme.typography.labelMedium.copy(
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant))
+                        }
+                        Spacer(Modifier.weight(1f))
+                        Surface(shape = RoundedCornerShape(50.dp),
+                            color = if (modelInfo.isReady) Color(0xFF173D2B)
+                                else ElectricViolet.copy(alpha = 0.13f)) {
+                            Row(Modifier.padding(horizontal = 10.dp, vertical = 7.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                Box(Modifier.size(7.dp).clip(CircleShape).background(
+                                    if (modelInfo.isReady) Color(0xFF61D99A) else ElectricViolet))
+                                Text(if (modelInfo.isReady) "READY" else "LOCAL",
+                                    style = MaterialTheme.typography.labelSmall.copy(
+                                        fontWeight = FontWeight.Bold,
+                                        color = if (modelInfo.isReady) Color(0xFF8EE6B5) else ElectricViolet))
+                            }
+                        }
                     }
-                }
-            }
-
-            Spacer(Modifier.height(8.dp))
-
-            // A small, action-oriented guide turns advanced capabilities into
-            // things people can try immediately instead of hunt for in menus.
-            Column(
-                modifier = Modifier.fillMaxWidth(),
-                verticalArrangement = Arrangement.spacedBy(10.dp)
-            ) {
-                Text(
-                    text = "Try this",
-                    style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold)
-                )
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    DiscoveryChip("Ask anything", Icons.Rounded.AutoAwesome, Modifier.weight(1f)) {
-                        onPrompt("Help me think through ")
-                    }
-                    DiscoveryChip("Add a document", Icons.Rounded.AttachFile, Modifier.weight(1f)) { onDocumentClick() }
-                }
-                Text(
-                    "Tip: swipe up in the message box to reuse a recent prompt.",
-                    style = MaterialTheme.typography.labelSmall.copy(
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                )
-            }
-
-            // Recent Chats section
-            if (sessions.isNotEmpty()) {
-                Column(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    Text(
-                        text  = "Recent Chats",
-                        style = MaterialTheme.typography.bodyMedium.copy(
-                            fontWeight = FontWeight.Bold,
-                            color      = MaterialTheme.colorScheme.onSurface
-                        )
-                    )
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .horizontalScroll(androidx.compose.foundation.rememberScrollState()),
-                        horizontalArrangement = Arrangement.spacedBy(10.dp)
-                    ) {
-                        sessions.take(4).forEach { session ->
-                            Surface(
-                                onClick = { onSessionClick(session) },
-                                shape   = RoundedCornerShape(16.dp),
-                                color   = MaterialTheme.colorScheme.surfaceContainer,
-                                border  = androidx.compose.foundation.BorderStroke(
-                                    1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.15f)
-                                ),
-                                modifier = Modifier.width(160.dp)
-                            ) {
-                                Column(
-                                    modifier = Modifier.padding(12.dp),
-                                    verticalArrangement = Arrangement.spacedBy(10.dp)
-                                ) {
-                                    Box(
-                                        modifier = Modifier
-                                            .size(32.dp)
-                                            .clip(CircleShape)
-                                            .background(ElectricViolet.copy(alpha = 0.12f)),
-                                        contentAlignment = Alignment.Center
-                                    ) {
-                                        Icon(
-                                            imageVector = Icons.Rounded.Forum,
-                                            contentDescription = null,
-                                            tint = ElectricViolet,
-                                            modifier = Modifier.size(16.dp)
-                                        )
-                                    }
-                                    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                                        Text(
-                                            text     = session.title,
-                                            style    = MaterialTheme.typography.bodySmall.copy(
-                                                fontWeight = FontWeight.SemiBold
-                                            ),
-                                            maxLines = 1,
-                                            overflow = TextOverflow.Ellipsis
-                                        )
-                                        Text(
-                                            text  = formatSessionDate(session.createdAt),
-                                            style = MaterialTheme.typography.labelSmall.copy(
-                                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                                            )
-                                        )
-                                    }
+                    Text("Big ideas.\nRight in your pocket.",
+                        style = MaterialTheme.typography.headlineMedium.copy(
+                            fontWeight = FontWeight.ExtraBold, lineHeight = 35.sp,
+                            letterSpacing = (-0.6).sp),
+                        color = MaterialTheme.colorScheme.onSurface)
+                    Text("Think it through, make something, or just ask. Your conversations stay on this device.",
+                        style = MaterialTheme.typography.bodyMedium.copy(lineHeight = 21.sp),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Row(horizontalArrangement = Arrangement.spacedBy(9.dp)) {
+                        listOf(Icons.Rounded.WifiOff to "Works offline",
+                            Icons.Rounded.Lock to "Stays private").forEach { (icon, label) ->
+                            Surface(shape = RoundedCornerShape(50.dp),
+                                color = ElectricViolet.copy(alpha = 0.13f)) {
+                                Row(Modifier.padding(horizontal = 10.dp, vertical = 7.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+                                    Icon(icon, null, tint = ElectricViolet, modifier = Modifier.size(15.dp))
+                                    Text(label, style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurface)
                                 }
                             }
                         }
                     }
+                    Surface(onClick = onModelClick, shape = RoundedCornerShape(15.dp),
+                        color = ElectricViolet, contentColor = OnAmber) {
+                        Row(Modifier.fillMaxWidth().padding(horizontal = 15.dp, vertical = 12.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(9.dp)) {
+                            Icon(Icons.Rounded.Memory, null, modifier = Modifier.size(19.dp))
+                            Column(Modifier.weight(1f)) {
+                                Text(if (modelInfo.isReady) modelInfo.displayName else "Your on-device model",
+                                    style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold),
+                                    maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                Text(if (modelInfo.isReady) "Tap to manage models" else "Tap to check model setup",
+                                    style = MaterialTheme.typography.labelSmall)
+                            }
+                            Icon(Icons.Rounded.ArrowForward, null)
+                        }
+                    }
                 }
             }
-
-            // Feature Prompt Grid
-            Column(
-                modifier = Modifier.fillMaxWidth(),
-                verticalArrangement = Arrangement.spacedBy(10.dp)
-            ) {
-                Text(
-                    text  = "Explore & Create",
-                    style = MaterialTheme.typography.bodyMedium.copy(
-                        fontWeight = FontWeight.Bold,
-                        color      = MaterialTheme.colorScheme.onSurface
-                    )
-                )
-
-                // Row 1
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp)
-                ) {
-                    FeatureCard(
-                        title       = "Code Helper",
-                        description = "Write code, debug errors, or explain syntax.",
-                        icon        = Icons.Rounded.Code,
-                        iconColor   = Color(0xFF4CAF50),
-                        modifier    = Modifier.weight(1f),
-                        onClick     = { onPrompt("Write a Kotlin function to ") }
-                    )
-                    FeatureCard(
-                        title       = "Concept Explainer",
-                        description = "Explain complex topics or snippets simply.",
-                        icon        = Icons.Rounded.Lightbulb,
-                        iconColor   = Color(0xFFFFB300),
-                        modifier    = Modifier.weight(1f),
-                        onClick     = { onPrompt("Explain in simple terms: ") }
-                    )
-                }
-
-                // Row 2
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp)
-                ) {
-                    FeatureCard(
-                        title       = "Creative Writer",
-                        description = "Draft emails, essays, summaries, or captions.",
-                        icon        = Icons.Rounded.Edit,
-                        iconColor   = ElectricViolet,
-                        modifier    = Modifier.weight(1f),
-                        onClick     = { onPrompt("Write a short, friendly email to ") }
-                    )
-                    FeatureCard(
-                        title       = "Brainstorm",
-                        description = "Generate outlines, concepts, topics, or ideas.",
-                        icon        = Icons.Rounded.AutoAwesome,
-                        iconColor   = Color(0xFFE91E63),
-                        modifier    = Modifier.weight(1f),
-                        onClick     = { onPrompt("Brainstorm 5 creative ideas for ") }
-                    )
-                }
-            }
-
-            Spacer(Modifier.height(16.dp))
         }
+
+        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Text("Pick a starting point", style = MaterialTheme.typography.titleLarge.copy(
+                fontWeight = FontWeight.Bold))
+            val promptColumns = if (LocalConfiguration.current.screenWidthDp < 360 ||
+                LocalDensity.current.fontScale > 1.4f) 1 else 2
+            featured.chunked(promptColumns).forEach { rowTemplates ->
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(11.dp)) {
+                    rowTemplates.forEach { template ->
+                        FeatureCard(template.title, template.description, template.icon,
+                            template.iconColor, Modifier.weight(1f)) { onTemplate(template) }
+                    }
+                    if (rowTemplates.size == 1 && promptColumns == 2) Spacer(Modifier.weight(1f))
+                }
+            }
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                Button(onClick = onDocumentClick, modifier = Modifier.weight(1f),
+                    shape = RoundedCornerShape(15.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+                        contentColor = MaterialTheme.colorScheme.onSurface)) {
+                    Icon(Icons.Rounded.AttachFile, null, tint = ElectricViolet)
+                    Spacer(Modifier.width(7.dp))
+                    Text("Ask about a file")
+                }
+                OutlinedButton(onClick = { showAllTemplates = !showAllTemplates },
+                    modifier = Modifier.weight(1f), shape = RoundedCornerShape(15.dp)) {
+                    Icon(Icons.Rounded.AutoAwesome, null, tint = ElectricViolet)
+                    Spacer(Modifier.width(7.dp))
+                    Text(if (showAllTemplates) "Show less" else "Explore prompts")
+                }
+            }
+        }
+
+        if (showAllTemplates) {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text("More prompts", style = MaterialTheme.typography.titleMedium)
+                promptTemplates.drop(4).forEach { template ->
+                    FeatureCard(template.title, template.description, template.icon,
+                        template.iconColor, Modifier.fillMaxWidth()) { onTemplate(template) }
+                }
+            }
+        }
+        if (sessions.isNotEmpty()) {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(Icons.Rounded.History, null, tint = ElectricViolet,
+                    modifier = Modifier.size(21.dp))
+                Text("Your recent chats", style = MaterialTheme.typography.titleMedium.copy(
+                        fontWeight = FontWeight.Bold), modifier = Modifier.weight(1f))
+                }
+                sessions.take(4).forEachIndexed { index, session ->
+                    Surface(onClick = { onSessionClick(session) },
+                        shape = RoundedCornerShape(17.dp),
+                        color = MaterialTheme.colorScheme.surfaceContainer,
+                        border = androidx.compose.foundation.BorderStroke(
+                            1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.18f)),
+                        modifier = Modifier.fillMaxWidth()) {
+                        Row(Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                            Surface(shape = RoundedCornerShape(12.dp),
+                                color = ElectricViolet.copy(alpha = if (index == 0) 0.19f else 0.09f)) {
+                                Icon(Icons.Rounded.ChatBubbleOutline, null, tint = ElectricViolet,
+                                    modifier = Modifier.padding(9.dp).size(19.dp))
+                            }
+                            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                                Text(session.title, style = MaterialTheme.typography.bodyMedium.copy(
+                                    fontWeight = FontWeight.SemiBold), maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis)
+                                Text(formatSessionDate(session.createdAt),
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                            Icon(Icons.Rounded.ChevronRight, null,
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                    }
+                }
+            }
+        }
+        Spacer(Modifier.height(12.dp))
     }
 }
 
@@ -1653,12 +1763,25 @@ private fun DiscoveryChip(
     modifier: Modifier = Modifier,
     onClick: () -> Unit
 ) {
+    val interactionSource = remember { MutableInteractionSource() }
+    val pressed by interactionSource.collectIsPressedAsState()
+    val pressScale by animateFloatAsState(
+        targetValue = if (pressed) 0.97f else 1f,
+        animationSpec = PocketShadowMotion.pressSpring,
+        label = "discovery_press"
+    )
     Surface(
-        onClick = onClick,
         shape = RoundedCornerShape(14.dp),
         color = MaterialTheme.colorScheme.surfaceContainer,
         border = androidx.compose.foundation.BorderStroke(0.5.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.35f)),
-        modifier = modifier.heightIn(min = 48.dp)
+        modifier = modifier
+            .heightIn(min = 48.dp)
+            .graphicsLayer { scaleX = pressScale; scaleY = pressScale }
+            .clickable(
+                interactionSource = interactionSource,
+                indication = androidx.compose.foundation.LocalIndication.current,
+                onClick = onClick
+            )
     ) {
         Row(
             modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
@@ -1680,23 +1803,37 @@ private fun FeatureCard(
     modifier   : Modifier = Modifier,
     onClick    : () -> Unit
 ) {
+    val interactionSource = remember { MutableInteractionSource() }
+    val pressed by interactionSource.collectIsPressedAsState()
+    val pressScale by animateFloatAsState(
+        targetValue = if (pressed) 0.97f else 1f,
+        animationSpec = PocketShadowMotion.pressSpring,
+        label = "feature_press"
+    )
     Surface(
-        onClick = onClick,
-        shape   = RoundedCornerShape(16.dp),
+        shape   = RoundedCornerShape(14.dp),
         color   = MaterialTheme.colorScheme.surfaceContainer,
         border  = androidx.compose.foundation.BorderStroke(
-            0.5.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.25f)
+            0.5.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.38f)
         ),
         modifier = modifier
+            .graphicsLayer { scaleX = pressScale; scaleY = pressScale }
+            .clickable(
+                interactionSource = interactionSource,
+                indication = androidx.compose.foundation.LocalIndication.current,
+                onClick = onClick
+            )
     ) {
         Column(
-            modifier = Modifier.padding(14.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp)
+            modifier = Modifier
+                .heightIn(min = 108.dp)
+                .padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp)
         ) {
             Box(
                 modifier = Modifier
-                    .size(36.dp)
-                    .clip(CircleShape)
+                    .size(30.dp)
+                    .clip(RoundedCornerShape(9.dp))
                     .background(iconColor.copy(alpha = 0.15f)),
                 contentAlignment = Alignment.Center
             ) {
@@ -1704,7 +1841,7 @@ private fun FeatureCard(
                     imageVector = icon,
                     contentDescription = null,
                     tint = iconColor,
-                    modifier = Modifier.size(18.dp)
+                    modifier = Modifier.size(17.dp)
                 )
             }
             Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
@@ -1714,9 +1851,9 @@ private fun FeatureCard(
                 )
                 Text(
                     text  = description,
-                    style = MaterialTheme.typography.labelSmall.copy(
+                    style = MaterialTheme.typography.bodySmall.copy(
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        lineHeight = 14.sp
+                        lineHeight = 17.sp
                     ),
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis
@@ -1768,8 +1905,19 @@ private fun StreamingBubble(
                     .background(MaterialTheme.colorScheme.surfaceContainer)
                     .padding(horizontal = 14.dp, vertical = 12.dp)
             ) {
-                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                    repeat(3) { i ->
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            "Thinking",
+                            style = MaterialTheme.typography.labelMedium.copy(
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                        )
+                        Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                        repeat(3) { i ->
                         val delayAlpha by infiniteTransition.animateFloat(
                             initialValue  = 0.3f,
                             targetValue   = 1f,
@@ -1788,6 +1936,7 @@ private fun StreamingBubble(
                     }
                 }
             }
+        }
         }
     } else {
         // remember(id): a fresh currentTimeMillis() per token tick made the
@@ -1814,6 +1963,7 @@ private fun SettingsBottomSheet(
     onThemeMode          : (ThemeMode) -> Unit,
     onFontSize           : (FontScale) -> Unit,
     onHapticFeedback     : (Boolean) -> Unit,
+    onSoundEffects       : (Boolean) -> Unit,
     onAutoScroll         : (Boolean) -> Unit,
     onSaveHistory        : (Boolean) -> Unit,
     onContextWindowSize  : (Int) -> Unit,
@@ -1849,6 +1999,9 @@ private fun SettingsBottomSheet(
             Modifier
                 .fillMaxWidth()
                 .navigationBarsPadding()
+                .animateContentSize(
+                    animationSpec = tween(durationMillis = 220)
+                )
                 .verticalScroll(rememberScrollState())
                 .padding(horizontal = 24.dp)
                 .padding(bottom = 28.dp),
@@ -1891,6 +2044,7 @@ private fun SettingsBottomSheet(
                 }
             }
             Spacer(Modifier.height(24.dp))
+
             SettingsSectionHeader("MODEL ON THIS DEVICE")
             Spacer(Modifier.height(8.dp))
             ModelPickerRow(
@@ -1917,6 +2071,8 @@ private fun SettingsBottomSheet(
             Spacer(Modifier.height(4.dp))
             SettingsSwitchRow("Haptic Feedback", "Vibrate on send and long-press",
                 uiState.hapticFeedback, onHapticFeedback)
+            SettingsSwitchRow("Sound Effects", "Soft sounds for send and completion",
+                uiState.soundEffects, onSoundEffects)
             SettingsSwitchRow("Auto-scroll", "Keep latest message in view",
                 uiState.autoScroll, onAutoScroll)
             Spacer(Modifier.height(24.dp))
@@ -2136,7 +2292,7 @@ private fun AboutSection(
 
         // Privacy note
         Text(
-            "🔒 All conversations are processed and stored locally on this device only. Nothing is ever sent to any server.",
+            "All conversations are processed and stored locally on this device only. Nothing is ever sent to any server.",
             style = MaterialTheme.typography.bodySmall.copy(
                 color      = MaterialTheme.colorScheme.onSurfaceVariant,
                 lineHeight = 18.sp
@@ -2200,18 +2356,20 @@ private fun sendFeedback(context: Context) {
 
 @Composable
 private fun SettingsSectionHeader(title: String) {
-    Text(
-        title,
-        style = MaterialTheme.typography.labelSmall.copy(
-            color         = ElectricViolet,
-            fontWeight    = FontWeight.Bold,
-            letterSpacing = 1.2.sp
-        )
-    )
-    Spacer(Modifier.height(2.dp))
-    HorizontalDivider(
-        color     = MaterialTheme.colorScheme.outline.copy(alpha = 0.4f),
-        thickness = 0.5.dp)
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(top = 3.dp, bottom = 7.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(9.dp)
+    ) {
+        Box(Modifier.size(8.dp).clip(CircleShape)
+            .background(androidx.compose.ui.graphics.Brush.linearGradient(listOf(AmberBright, ElectricVioletDim))))
+        Text(title, style = MaterialTheme.typography.labelSmall.copy(
+            color = ElectricViolet, fontWeight = FontWeight.ExtraBold,
+            letterSpacing = 1.35.sp))
+        Spacer(Modifier.weight(1f))
+        HorizontalDivider(Modifier.width(44.dp), color = ElectricViolet.copy(alpha = 0.38f),
+            thickness = 1.dp)
+    }
 }
 
 @Composable
@@ -2259,7 +2417,7 @@ private fun ThemePickerRow(current: ThemeMode, onSelect: (ThemeMode) -> Unit) {
                 mode     = mode,
                 selected = current == mode,
                 onClick  = { onSelect(mode) },
-                modifier = Modifier.weight(1f, fill = false)
+                modifier = Modifier.widthIn(min = 62.dp)
             )
         }
     }
@@ -2283,7 +2441,7 @@ private fun ThemeSwatchChip(
             .border(borderWidth, borderColor, RoundedCornerShape(12.dp))
             .background(MaterialTheme.colorScheme.surfaceContainer)
             .clickable { onClick() }
-            .padding(vertical = 10.dp, horizontal = 6.dp),
+            .padding(vertical = 10.dp, horizontal = 8.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(6.dp)
     ) {
@@ -2451,16 +2609,22 @@ private fun ModelPickerRow(
 
     Surface(
         onClick = { showDialog = true },
-        shape   = RoundedCornerShape(12.dp),
-        color   = MaterialTheme.colorScheme.surfaceContainer
+        shape   = RoundedCornerShape(17.dp),
+        color   = MaterialTheme.colorScheme.surfaceContainer,
+        border  = androidx.compose.foundation.BorderStroke(1.dp, ElectricViolet.copy(alpha = 0.19f))
     ) {
         Row(
             Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 14.dp),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment     = Alignment.CenterVertically
         ) {
-            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                Text("Active Model", style = MaterialTheme.typography.bodyLarge)
+            Surface(shape = RoundedCornerShape(12.dp), color = ElectricViolet.copy(alpha = 0.12f)) {
+                Icon(Icons.Rounded.Memory, null, tint = ElectricViolet,
+                    modifier = Modifier.padding(10.dp).size(22.dp))
+            }
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Text("Active Model", style = MaterialTheme.typography.labelMedium.copy(
+                    color = MaterialTheme.colorScheme.onSurfaceVariant))
                 Text(
                     currentName,
                     style = MaterialTheme.typography.bodySmall.copy(
@@ -2958,181 +3122,163 @@ private fun CustomPromptField(value: String, onChange: (String) -> Unit) {
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun DocumentSheet(
-    onConfirm: (String?) -> Unit,
+    initialText: String,
+    initialName: String?,
+    excerpts: String,
+    onConfirm: (String?, String?) -> Unit,
     onDismiss: () -> Unit
 ) {
-    val context     = LocalContext.current
-    var text        by remember { mutableStateOf("") }
-    var editMode    by remember { mutableStateOf(false) }
-    var pasteError  by remember { mutableStateOf(false) }
-
-    fun pasteFromClipboard() {
-        val clipboard = context.getSystemService(android.content.ClipboardManager::class.java)
-        val clip = clipboard?.primaryClip
-        val pasted = clip?.getItemAt(0)?.coerceToText(context)?.toString() ?: ""
-        if (pasted.isBlank()) {
-            pasteError = true
-        } else {
-            text       = pasted
-            pasteError = false
-            editMode   = false
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    var text by remember { mutableStateOf(initialText) }
+    var filename by remember { mutableStateOf(initialName) }
+    var busy by remember { mutableStateOf(false) }
+    var error by remember { mutableStateOf<String?>(null) }
+    var editMode by remember { mutableStateOf(false) }
+    var showSources by remember { mutableStateOf(false) }
+    val picker = androidx.activity.compose.rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocument()
+    ) { uri ->
+        if (uri != null) {
+            busy = true
+            error = null
+            scope.launch {
+                try {
+                    val result = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                        val name = context.contentResolver.query(uri,
+                            arrayOf(android.provider.OpenableColumns.DISPLAY_NAME), null, null, null)?.use { cursor ->
+                            if (cursor.moveToFirst()) cursor.getString(0) else null
+                        } ?: "Text document"
+                        val content = context.contentResolver.openInputStream(uri)?.use {
+                            com.pocketshadow.app.data.repository.TextDocumentReader.read(it)
+                        } ?: throw IllegalArgumentException("Could not open this document. Try another file.")
+                        name to content
+                    }
+                    filename = result.first
+                    text = result.second
+                    editMode = false
+                } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                    throw cancelled
+                } catch (failure: Exception) {
+                    error = failure.message ?: "Could not read this file. Try a UTF-8 TXT or Markdown document."
+                } finally {
+                    busy = false
+                }
+            }
         }
     }
-
-    ModalBottomSheet(
-        onDismissRequest = onDismiss,
-        containerColor   = MaterialTheme.colorScheme.surfaceContainerHigh,
-        dragHandle       = {
-            BottomSheetDefaults.DragHandle(
-                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f))
-        }
-    ) {
+    ModalBottomSheet(onDismissRequest = onDismiss) {
         Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .navigationBarsPadding()
-                .padding(horizontal = 24.dp)
-                .padding(bottom = 24.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp)
+            Modifier.fillMaxWidth().imePadding().navigationBarsPadding()
+                .verticalScroll(rememberScrollState()).padding(24.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            // Header
-            Row(
-                Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment     = Alignment.CenterVertically
+            Surface(
+                shape = RoundedCornerShape(20.dp),
+                color = MaterialTheme.colorScheme.surfaceContainer,
+                border = androidx.compose.foundation.BorderStroke(
+                    1.dp, ElectricViolet.copy(alpha = 0.22f)),
+                modifier = Modifier.fillMaxWidth()
             ) {
-                Column {
-                    Text("Load Document",
-                        style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold))
-                    Text("Ask the AI questions about any text",
-                        style = MaterialTheme.typography.bodySmall.copy(
-                            color = MaterialTheme.colorScheme.onSurfaceVariant))
-                }
-                IconButton(onClick = onDismiss, modifier = Modifier.size(48.dp)) {
-                    Icon(Icons.Rounded.Close, null,
-                        tint     = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.size(18.dp))
-                }
-            }
-
-            // Primary action — no keyboard needed
-            Button(
-                onClick  = { pasteFromClipboard() },
-                modifier = Modifier.fillMaxWidth(),
-                shape    = RoundedCornerShape(14.dp),
-                colors   = ButtonDefaults.buttonColors(
-                    containerColor = ElectricViolet,
-                    contentColor   = White
-                )
-            ) {
-                Icon(Icons.Rounded.ContentPaste, null, modifier = Modifier.size(18.dp))
-                Spacer(Modifier.width(8.dp))
-                Text(
-                    if (text.isBlank()) "Paste from Clipboard" else "Re-paste from Clipboard",
-                    fontWeight = FontWeight.SemiBold
-                )
-            }
-
-            if (pasteError) {
-                Text(
-                    "Clipboard is empty — copy your text first, then tap Paste.",
-                    style = MaterialTheme.typography.bodySmall.copy(
-                        color = MaterialTheme.colorScheme.error)
-                )
-            }
-
-            // Preview / edit area — shown once text is loaded
-            if (text.isNotBlank()) {
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Row(
-                        Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment     = Alignment.CenterVertically
-                    ) {
-                        val words = text.trim().split("\\s+".toRegex()).size
-                        Text(
-                            "$words words · ${text.length} chars",
-                            style = MaterialTheme.typography.labelSmall.copy(
-                                color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        )
-                        TextButton(
-                            onClick = { editMode = !editMode },
-                            colors  = ButtonDefaults.textButtonColors(contentColor = ElectricViolet)
-                        ) {
-                            Icon(
-                                if (editMode) Icons.Rounded.Check else Icons.Rounded.Edit,
-                                null, modifier = Modifier.size(14.dp)
-                            )
-                            Spacer(Modifier.width(4.dp))
-                            Text(
-                                if (editMode) "Done" else "Edit",
-                                style = MaterialTheme.typography.labelSmall
-                            )
-                        }
-                    }
-
-                    if (editMode) {
-                        // Full editable field — keyboard appears only when user explicitly taps Edit
-                        OutlinedTextField(
-                            value         = text,
-                            onValueChange = { text = it },
-                            modifier      = Modifier.fillMaxWidth(),
-                            minLines      = 6,
-                            maxLines      = 12,
-                            shape         = RoundedCornerShape(14.dp),
-                            textStyle     = MaterialTheme.typography.bodySmall,
-                            colors        = OutlinedTextFieldDefaults.colors(
-                                focusedBorderColor      = ElectricViolet,
-                                unfocusedBorderColor    = MaterialTheme.colorScheme.outline.copy(alpha = 0.4f),
-                                focusedContainerColor   = MaterialTheme.colorScheme.surfaceContainer,
-                                unfocusedContainerColor = MaterialTheme.colorScheme.surfaceContainer,
-                                cursorColor             = ElectricViolet
-                            )
-                        )
-                    } else {
-                        // Read-only preview — no keyboard
-                        Surface(
-                            shape    = RoundedCornerShape(14.dp),
-                            color    = MaterialTheme.colorScheme.surfaceContainer,
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            Text(
-                                text     = text.take(600) + if (text.length > 600) "\n…" else "",
-                                style    = MaterialTheme.typography.bodySmall.copy(
-                                    color      = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    lineHeight = 18.sp
-                                ),
-                                modifier = Modifier.padding(14.dp)
-                            )
-                        }
-                    }
-                }
-
-                // Load button
-                Button(
-                    onClick  = { onConfirm(text.ifBlank { null }) },
-                    enabled  = text.isNotBlank(),
-                    modifier = Modifier.fillMaxWidth(),
-                    shape    = RoundedCornerShape(14.dp),
-                    colors   = ButtonDefaults.buttonColors(
-                        containerColor = ElectricViolet,
-                        contentColor   = White
-                    )
+                Row(
+                    Modifier.fillMaxWidth().background(androidx.compose.ui.graphics.Brush.linearGradient(listOf(
+                        ElectricViolet.copy(alpha = 0.17f),
+                        MaterialTheme.colorScheme.surfaceContainer
+                    ))).padding(start = 14.dp, end = 8.dp, top = 13.dp, bottom = 13.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
-                    Icon(Icons.Rounded.Article, null, modifier = Modifier.size(16.dp))
-                    Spacer(Modifier.width(6.dp))
-                    Text("Load Document", fontWeight = FontWeight.SemiBold)
+                    Surface(shape = RoundedCornerShape(13.dp),
+                        color = ElectricViolet.copy(alpha = 0.15f)) {
+                        Icon(Icons.Rounded.Article, null, tint = ElectricViolet,
+                            modifier = Modifier.padding(11.dp).size(23.dp))
+                    }
+                    Column(Modifier.weight(1f)) {
+                        Text("Add a document", style = MaterialTheme.typography.titleLarge.copy(
+                            fontWeight = FontWeight.Bold))
+                        Text("Give your next chat something to work from",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                    IconButton(onClick = onDismiss) { Icon(Icons.Rounded.Close, "Close document") }
                 }
             }
-
-            // Cancel
-            if (text.isBlank()) {
-                OutlinedButton(
-                    onClick  = onDismiss,
-                    modifier = Modifier.fillMaxWidth(),
-                    shape    = RoundedCornerShape(14.dp)
-                ) { Text("Cancel") }
+            Text("TXT or Markdown · UTF-8 · up to 1 MB",
+                style = MaterialTheme.typography.bodyMedium)
+            Text("Files are read on your phone. PDFs and Word files are not supported yet.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Button(
+                onClick = { picker.launch(arrayOf("text/plain", "text/markdown", "text/x-markdown")) },
+                enabled = !busy, modifier = Modifier.fillMaxWidth()
+            ) {
+                Icon(Icons.Rounded.AttachFile, null)
+                Spacer(Modifier.width(8.dp))
+                Text(if (text.isBlank()) "Choose file" else "Choose another file")
             }
+            OutlinedButton(
+                enabled = !busy,
+                onClick = {
+                    val clipboard = context.getSystemService(android.content.ClipboardManager::class.java)
+                    val pasted = clipboard?.primaryClip?.getItemAt(0)?.coerceToText(context)?.toString().orEmpty()
+                    when {
+                        pasted.isBlank() -> error = "Clipboard is empty. Copy some text first."
+                        pasted.toByteArray(Charsets.UTF_8).size > com.pocketshadow.app.data.repository.TextDocumentReader.MAX_BYTES ->
+                            error = "Paste less than 1 MB of text."
+                        else -> { text = pasted; filename = "Pasted text"; error = null; editMode = false }
+                    }
+                }, modifier = Modifier.fillMaxWidth()
+            ) { Text("Paste text instead") }
+            if (busy) {
+                LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                Text("Reading document…", style = MaterialTheme.typography.bodySmall)
+            }
+            error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+            if (text.isNotBlank() || editMode) {
+                Text(filename ?: "Pasted text", style = MaterialTheme.typography.titleMedium)
+                Text("${text.trim().split(Regex("\\s+")).size} words",
+                    style = MaterialTheme.typography.bodySmall)
+                TextButton(onClick = { editMode = !editMode }, enabled = !busy) {
+                    Text(if (editMode) "Done editing" else "Edit text")
+                }
+                if (editMode) {
+                    OutlinedTextField(
+                        value = text, onValueChange = { text = it },
+                        label = { Text("Document text") },
+                        modifier = Modifier.fillMaxWidth(),
+                        minLines = 3, maxLines = 8
+                    )
+                } else {
+                Surface(shape = RoundedCornerShape(16.dp),
+                    color = MaterialTheme.colorScheme.surfaceContainer,
+                    border = androidx.compose.foundation.BorderStroke(
+                        1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.2f)),
+                    modifier = Modifier.fillMaxWidth()) {
+                    Text(text.take(600) + if (text.length > 600) "\n…" else "",
+                        style = MaterialTheme.typography.bodySmall.copy(lineHeight = 20.sp),
+                        modifier = Modifier.padding(15.dp))
+                }
+                }
+                Text("Answers use relevant excerpts selected for each question and cite [Excerpt N]. Selection may not cover the entire document.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            if (excerpts.isNotBlank() && text == initialText && initialText.isNotBlank()) {
+                TextButton(onClick = { showSources = !showSources }) {
+                    Text(if (showSources) "Hide sources" else "View excerpts from latest question")
+                }
+                if (showSources) {
+                    androidx.compose.foundation.text.selection.SelectionContainer {
+                        Text(excerpts, style = MaterialTheme.typography.bodySmall)
+                    }
+                }
+            }
+            Button(
+                onClick = { onConfirm(text, filename ?: "Pasted text") },
+                enabled = !busy && text.isNotBlank() &&
+                    text.toByteArray(Charsets.UTF_8).size <= com.pocketshadow.app.data.repository.TextDocumentReader.MAX_BYTES,
+                modifier = Modifier.fillMaxWidth()
+            ) { Text("Use document") }
         }
     }
 }
@@ -3231,6 +3377,41 @@ private fun ModelInfoSheet(
             )
             Spacer(Modifier.height(20.dp))
 
+            Surface(
+                shape = RoundedCornerShape(18.dp),
+                color = ElectricViolet.copy(alpha = 0.10f),
+                border = androidx.compose.foundation.BorderStroke(
+                    1.dp, ElectricViolet.copy(alpha = 0.28f)
+                ),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(
+                    modifier = Modifier.padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        Icon(Icons.Rounded.Lock, contentDescription = null, tint = ElectricViolet,
+                            modifier = Modifier.size(22.dp))
+                        Text("Private by design",
+                            style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold))
+                    }
+                    Text(
+                        "Your prompts and replies are processed by the model on this phone. Chat content is not uploaded or shared with a cloud service.",
+                        style = MaterialTheme.typography.bodySmall.copy(
+                            color = MaterialTheme.colorScheme.onSurfaceVariant, lineHeight = 18.sp)
+                    )
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        PrivacyFact("Offline")
+                        PrivacyFact("No account")
+                        PrivacyFact("No tracking")
+                    }
+                }
+            }
+            Spacer(Modifier.height(20.dp))
+
             // Clear, friendly facts first; detailed engine values remain below.
             Surface(
                 shape = RoundedCornerShape(16.dp),
@@ -3246,6 +3427,27 @@ private fun ModelInfoSheet(
                     Column {
                         Text("Works without internet", style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold))
                         Text("PocketShadow runs this model on your phone; chat content does not leave it.", style = MaterialTheme.typography.bodySmall.copy(color = MaterialTheme.colorScheme.onSurfaceVariant, lineHeight = 18.sp))
+                    }
+                }
+            }
+            Spacer(Modifier.height(12.dp))
+            Surface(
+                shape = RoundedCornerShape(16.dp),
+                color = MaterialTheme.colorScheme.surfaceContainer,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Row(
+                    Modifier.padding(16.dp),
+                    verticalAlignment = Alignment.Top,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Icon(Icons.Rounded.TipsAndUpdates, null, tint = ElectricViolet, modifier = Modifier.size(22.dp))
+                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Text("Storage & RAM guidance", style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold))
+                        Text(
+                            "Keep at least 1 GB of free storage for model extraction. If loading fails, close other apps or choose the smaller model; large models need substantially more available RAM.",
+                            style = MaterialTheme.typography.bodySmall.copy(color = MaterialTheme.colorScheme.onSurfaceVariant, lineHeight = 18.sp)
+                        )
                     }
                 }
             }
@@ -3298,5 +3500,21 @@ private fun ModelInfoSheet(
                 }
             }
         }
+    }
+}
+@Composable
+private fun PrivacyFact(label: String) {
+    Surface(
+        shape = RoundedCornerShape(50),
+        color = ElectricViolet.copy(alpha = 0.14f)
+    ) {
+        Text(
+            label,
+            style = MaterialTheme.typography.labelSmall.copy(
+                color = ElectricViolet,
+                fontWeight = FontWeight.SemiBold
+            ),
+            modifier = Modifier.padding(horizontal = 9.dp, vertical = 5.dp)
+        )
     }
 }

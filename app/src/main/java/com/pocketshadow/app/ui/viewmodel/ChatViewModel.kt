@@ -19,6 +19,7 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.flow.*
+import kotlinx.coroutines.yield
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.util.UUID
@@ -46,11 +47,13 @@ data class ChatUiState(
     val themeMode        : ThemeMode               = ThemeMode.DARK,
     val fontSize         : FontScale               = FontScale.NORMAL,
     val hapticFeedback   : Boolean                 = true,
+    val soundEffects     : Boolean                 = true,
     val autoScroll       : Boolean                 = true,
     val saveHistory        : Boolean   = true,
     val contextWindowSize  : Int      = 20,
     // ── New features ──────────────────────────────────────────────────────────
     val documentContext    : String?  = null,   // null = Document Mode inactive
+    val documentName       : String? = null,
     val showDocumentSheet  : Boolean  = false,
     val showModelInfo      : Boolean  = false,
     val customSystemPrompt : String   = "",
@@ -84,6 +87,7 @@ class ChatViewModel @Inject constructor(
 
     private val _uiState = MutableStateFlow(ChatUiState())
     val uiState: StateFlow<ChatUiState> = _uiState.asStateFlow()
+    val documentExcerpts: StateFlow<String> = llmRepo.documentExcerpts
 
     /**
      * Live streaming buffer — intentionally a separate StateFlow so that
@@ -117,7 +121,7 @@ class ChatViewModel @Inject constructor(
         viewModelScope.launch {
             combine(
                 listOf(
-                    settingsRepo.themeMode, settingsRepo.fontSize, settingsRepo.hapticFeedback,
+                    settingsRepo.themeMode, settingsRepo.fontSize, settingsRepo.hapticFeedback, settingsRepo.soundEffects,
                     settingsRepo.autoScroll, settingsRepo.saveHistory, settingsRepo.contextWindowSize,
                     settingsRepo.customSystemPrompt, settingsRepo.ttsVoiceName, settingsRepo.ttsAccent,
                     settingsRepo.ttsSpeechRate, settingsRepo.ttsPitch, settingsRepo.selectedModelPath
@@ -128,15 +132,16 @@ class ChatViewModel @Inject constructor(
                         themeMode          = v[0]  as ThemeMode,
                         fontSize           = v[1]  as FontScale,
                         hapticFeedback     = v[2]  as Boolean,
-                        autoScroll         = v[3]  as Boolean,
-                        saveHistory        = v[4]  as Boolean,
-                        contextWindowSize  = v[5]  as Int,
-                        customSystemPrompt = v[6]  as String,
-                        ttsVoiceName       = v[7]  as String,
-                        ttsAccent          = v[8]  as String,
-                        ttsSpeechRate      = v[9]  as Float,
-                        ttsPitch           = v[10] as Float,
-                        selectedModelPath  = v[11] as String
+                        soundEffects       = v[3]  as Boolean,
+                        autoScroll         = v[4]  as Boolean,
+                        saveHistory        = v[5]  as Boolean,
+                        contextWindowSize  = v[6]  as Int,
+                        customSystemPrompt = v[7]  as String,
+                        ttsVoiceName       = v[8]  as String,
+                        ttsAccent          = v[9]  as String,
+                        ttsSpeechRate      = v[10] as Float,
+                        ttsPitch           = v[11] as Float,
+                        selectedModelPath  = v[12] as String
                     )
                 }
             }
@@ -151,6 +156,9 @@ class ChatViewModel @Inject constructor(
         // doesn't pay the multi-second model-load cost.
         viewModelScope.launch {
             llmRepo.scanAvailableModels()
+            // Let the first Compose frame and input pipeline settle before the
+            // native model allocates its large mmap/KV cache.
+            yield()
             llmRepo.warmUp()
         }
         // Input history (MRU) for swipe-up recall in ChatInputArea
@@ -173,6 +181,7 @@ class ChatViewModel @Inject constructor(
     fun setThemeMode(mode: ThemeMode)   { settingsRepo.setThemeMode(mode) }
     fun setFontSize(scale: FontScale)   { settingsRepo.setFontSize(scale) }
     fun setHapticFeedback(on: Boolean)  { settingsRepo.setHapticFeedback(on) }
+    fun setSoundEffects(on: Boolean)    { settingsRepo.setSoundEffects(on) }
     fun setAutoScroll(on: Boolean)      { settingsRepo.setAutoScroll(on) }
     fun setSaveHistory(on: Boolean)     { settingsRepo.setSaveHistory(on) }
     fun setContextWindowSize(n: Int)       { settingsRepo.setContextWindowSize(n) }
@@ -186,6 +195,14 @@ class ChatViewModel @Inject constructor(
     }
 
     fun refreshAvailableModels() { viewModelScope.launch { llmRepo.scanAvailableModels() } }
+
+    fun retryModelLoading() {
+        viewModelScope.launch {
+            llmRepo.resetModel()
+            llmRepo.scanAvailableModels()
+            llmRepo.warmUp()
+        }
+    }
 
     // ── Local encrypted archive ──────────────────────────────────────────────
     suspend fun exportEncryptedArchive(passphrase: String): Result<ByteArray> =
@@ -231,8 +248,14 @@ class ChatViewModel @Inject constructor(
     // ── Document mode ─────────────────────────────────────────────────────────
     fun showDocumentSheet()                { _uiState.update { it.copy(showDocumentSheet = true) } }
     fun dismissDocumentSheet()             { _uiState.update { it.copy(showDocumentSheet = false) } }
-    fun setDocumentContext(text: String?)  { _uiState.update { it.copy(documentContext = text?.ifBlank { null }, showDocumentSheet = false) } }
-    fun clearDocumentContext()             { _uiState.update { it.copy(documentContext = null) } }
+    fun setDocumentContext(text: String?, name: String? = null) {
+        if (text != _uiState.value.documentContext) llmRepo.clearDocumentExcerpts()
+        _uiState.update { it.copy(documentContext = text?.ifBlank { null }, documentName = name, showDocumentSheet = false) }
+    }
+    fun clearDocumentContext() {
+        llmRepo.clearDocumentExcerpts()
+        _uiState.update { it.copy(documentContext = null, documentName = null) }
+    }
 
     // ── Model info ────────────────────────────────────────────────────────────
     fun showModelInfo()                    { _uiState.update { it.copy(showModelInfo = true) } }

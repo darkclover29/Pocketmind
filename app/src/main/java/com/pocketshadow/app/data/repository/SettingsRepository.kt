@@ -72,6 +72,16 @@ class SettingsRepository @Inject constructor(
         _hapticFeedback.value = enabled
     }
 
+    // ── Sound effects ────────────────────────────────────────────────────────
+
+    private val _soundEffects = MutableStateFlow(prefs.getBoolean(KEY_SOUND_EFFECTS, true))
+    val soundEffects: StateFlow<Boolean> = _soundEffects.asStateFlow()
+
+    fun setSoundEffects(enabled: Boolean) {
+        prefs.edit().putBoolean(KEY_SOUND_EFFECTS, enabled).apply()
+        _soundEffects.value = enabled
+    }
+
     // ── Context window size (how many past messages the AI sees) ──────────────
 
     private val _contextWindowSize = MutableStateFlow(prefs.getInt(KEY_CONTEXT_SIZE, 10))
@@ -188,6 +198,7 @@ class SettingsRepository @Inject constructor(
         private const val KEY_THEME           = "theme_mode"
         private const val KEY_FONT_SCALE      = "font_scale"
         private const val KEY_HAPTIC          = "haptic_feedback"
+        private const val KEY_SOUND_EFFECTS   = "sound_effects"
         private const val KEY_CONTEXT_SIZE    = "context_window_size"
         private const val KEY_SAVE_HISTORY    = "save_history"
         private const val KEY_AUTO_SCROLL     = "auto_scroll"

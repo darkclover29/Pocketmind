@@ -92,7 +92,7 @@ interface ChatDao {
                m.timestamp AS timestamp
         FROM chat_messages m
         INNER JOIN chat_sessions s ON m.sessionId = s.sessionId
-        WHERE m.content LIKE '%' || :query || '%'
+        WHERE m.content LIKE '%' || :query || '%' ESCAPE '\'
         ORDER BY m.timestamp DESC
         LIMIT 50
         """

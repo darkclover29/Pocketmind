@@ -3,6 +3,7 @@ package com.pocketshadow.app.ui.theme
 import android.app.Activity
 import android.content.res.Configuration
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Shapes
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
@@ -12,6 +13,8 @@ import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.unit.Density
+import androidx.compose.ui.unit.dp
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.core.view.WindowCompat
 
 // ── Theme mode ────────────────────────────────────────────────────────────────
@@ -41,9 +44,9 @@ private val DarkColorScheme = darkColorScheme(
     surfaceContainerHigh = DarkElevated,
     surfaceContainerLow  = DarkCode,
     primary              = ElectricViolet,
-    onPrimary            = White,
+    onPrimary            = OnAmber,
     primaryContainer     = ElectricVioletDim,
-    onPrimaryContainer   = White,
+    onPrimaryContainer   = OnAmber,
     secondary            = DarkHint,
     onSecondary          = DarkBg,
     onBackground         = White,
@@ -62,9 +65,9 @@ private val NavyColorScheme = darkColorScheme(
     surfaceContainerHigh = NavyElevated,
     surfaceContainerLow  = NavyCode,
     primary              = ElectricViolet,
-    onPrimary            = White,
+    onPrimary            = OnAmber,
     primaryContainer     = ElectricVioletDim,
-    onPrimaryContainer   = White,
+    onPrimaryContainer   = OnAmber,
     secondary            = NavyHint,
     onSecondary          = NavyBg,
     onBackground         = White,
@@ -83,9 +86,9 @@ private val ForestColorScheme = darkColorScheme(
     surfaceContainerHigh = ForestElevated,
     surfaceContainerLow  = ForestCode,
     primary              = ElectricViolet,
-    onPrimary            = White,
+    onPrimary            = OnAmber,
     primaryContainer     = ElectricVioletDim,
-    onPrimaryContainer   = White,
+    onPrimaryContainer   = OnAmber,
     secondary            = ForestHint,
     onSecondary          = ForestBg,
     onBackground         = White,
@@ -104,9 +107,9 @@ private val LightColorScheme = lightColorScheme(
     surfaceContainerHigh = LightElevated,
     surfaceContainerLow  = LightCode,
     primary              = ElectricViolet,
-    onPrimary            = White,
+    onPrimary            = OnAmber,
     primaryContainer     = ElectricVioletDim,
-    onPrimaryContainer   = White,
+    onPrimaryContainer   = OnAmber,
     secondary            = LightHint,
     onSecondary          = White,
     onBackground         = NearBlack,
@@ -125,9 +128,9 @@ private val WarmColorScheme = lightColorScheme(
     surfaceContainerHigh = WarmElevated,
     surfaceContainerLow  = WarmCode,
     primary              = ElectricViolet,
-    onPrimary            = White,
+    onPrimary            = OnAmber,
     primaryContainer     = ElectricVioletDim,
-    onPrimaryContainer   = White,
+    onPrimaryContainer   = OnAmber,
     secondary            = WarmHint,
     onSecondary          = White,
     onBackground         = WarmText,
@@ -200,6 +203,13 @@ fun PocketShadowTheme(
         MaterialTheme(
             colorScheme = colorScheme,
             typography  = PocketShadowTypography,
+            shapes      = Shapes(
+                extraSmall = RoundedCornerShape(8.dp),
+                small = RoundedCornerShape(12.dp),
+                medium = RoundedCornerShape(16.dp),
+                large = RoundedCornerShape(22.dp),
+                extraLarge = RoundedCornerShape(28.dp)
+            ),
             content     = content
         )
     }

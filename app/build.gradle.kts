@@ -35,7 +35,7 @@ val localProps = Properties().also { props ->
 
 android {
     namespace  = "com.pocketshadow.app"
-    compileSdk = 35
+    compileSdk = 36
 
     assetPacks.add(":model_pack")
 
@@ -61,9 +61,10 @@ android {
     defaultConfig {
         applicationId = "com.pocketshadow.app"
         minSdk        = 26
-        targetSdk     = 35
-        versionCode   = 2
-        versionName   = "1.0.1"
+        targetSdk     = 36
+        versionCode   = 3
+        versionName   = "1.0.2"
+        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
         // Limit to 64-bit ABIs — required for Play Store 64-bit policy
         // and ensures MediaPipe native libs are packaged correctly.
@@ -160,6 +161,7 @@ dependencies {
     implementation(libs.lifecycle.viewmodel.compose)
     implementation(libs.lifecycle.runtime.compose)
     debugImplementation(libs.compose.ui.tooling)
+    debugImplementation(libs.compose.ui.test.manifest)
     implementation(libs.compose.ui.tooling.preview)
 
     // ── Room ──────────────────────────────────────────────────────────────────
@@ -197,4 +199,6 @@ dependencies {
     androidTestImplementation(libs.room.testing)
     androidTestImplementation(libs.androidx.test.ext.junit)
     androidTestImplementation(libs.androidx.test.core.ktx)
+    androidTestImplementation(platform(libs.compose.bom))
+    androidTestImplementation(libs.compose.ui.test.junit4)
 }

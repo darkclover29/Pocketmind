@@ -105,7 +105,12 @@ class ChatHistoryRepository @Inject constructor(
 
     /** Returns up to 50 matches ordered by recency. */
     suspend fun searchMessages(query: String): List<SearchResult> =
-        dao.searchMessages(query)
+        dao.searchMessages(query.escapeLikeWildcards())
+
+    private fun String.escapeLikeWildcards(): String =
+        replace("\\", "\\\\")
+            .replace("%", "\\%")
+            .replace("_", "\\_")
 
     // ── Input history (MRU user prompts) ─────────────────────────────────────
 

@@ -8,10 +8,9 @@
         which satisfies Play Store's data safety requirements for "no data shared".
     -->
 
-    <!-- Voice input. Recognition runs in the system recognizer service (we
-         prefer the fully on-device recognizer); the app itself still has no
-         INTERNET permission. -->
+    <!-- Voice input uses only Android's on-device recognizer. No network fallback. -->
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <uses-permission android:name="android.permission.VIBRATE" />
 
     <!-- Package visibility (API 30+): required to bind the speech service -->
     <queries>
@@ -33,7 +32,8 @@
         android:theme="@style/Theme.PocketShadow"
         android:enableOnBackInvokedCallback="true"
         android:largeHeap="true"
-        tools:targetApi="35">
+        android:resizeableActivity="true"
+        tools:targetApi="36">
 
         <!-- GPU acceleration via vendor OpenCL for MediaPipe inference -->
         <uses-native-library
@@ -51,7 +51,7 @@
             android:exported="true"
             android:theme="@style/Theme.PocketShadow.Splash"
             android:windowSoftInputMode="adjustResize"
-            android:screenOrientation="portrait">
+            android:screenOrientation="unspecified">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />

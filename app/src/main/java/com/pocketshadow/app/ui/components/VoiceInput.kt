@@ -24,10 +24,8 @@ private const val TAG = "VoiceInput"
 /**
  * Thin state holder around [SpeechRecognizer] for dictation into the composer.
  *
- * Privacy: on API 31+ with an on-device recognizer available we bind THAT
- * (recognition never leaves the phone). Otherwise we fall back to the default
- * recognizer with EXTRA_PREFER_OFFLINE — the app itself has no INTERNET
- * permission either way; recognition runs in the system service process.
+ * Privacy: only the on-device recognizer is used. Devices without it can
+ * still use typed input; we never fall back to a network recognition service.
  */
 @Stable
 class VoiceInputState internal constructor(
@@ -38,7 +36,12 @@ class VoiceInputState internal constructor(
     var isListening by mutableStateOf(false)
         private set
 
-    val isAvailable: Boolean = SpeechRecognizer.isRecognitionAvailable(context)
+    val isAvailable: Boolean
+        get() = Build.VERSION.SDK_INT >= 31 &&
+            SpeechRecognizer.isOnDeviceRecognitionAvailable(context)
+
+    var errorMessage by mutableStateOf<String?>(null)
+        private set
 
     private var recognizer: SpeechRecognizer? = null
 
@@ -53,6 +56,7 @@ class VoiceInputState internal constructor(
 
         override fun onError(error: Int) {
             isListening = false
+            errorMessage = "On-device dictation could not finish. Check your offline speech language in device settings, or type your message."
             // NO_MATCH / SPEECH_TIMEOUT are normal "heard nothing" outcomes.
             if (error != SpeechRecognizer.ERROR_NO_MATCH &&
                 error != SpeechRecognizer.ERROR_SPEECH_TIMEOUT
@@ -79,10 +83,18 @@ class VoiceInputState internal constructor(
 
     /** Caller must hold RECORD_AUDIO before calling. */
     fun start() {
-        if (!isAvailable || isListening) return
-        val r = recognizer ?: createRecognizer().also {
+        if (isListening) return
+        if (!isAvailable) {
+            errorMessage = "On-device dictation is unavailable on this device. You can still type; audio is never sent to a cloud recognizer."
+            return
+        }
+        errorMessage = null
+        val r = runCatching { recognizer ?: createRecognizer().also {
             it.setRecognitionListener(listener)
             recognizer = it
+        } }.getOrElse {
+            errorMessage = "Could not start on-device dictation. Please type your message."
+            return
         }
         val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
             putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL,
@@ -95,6 +107,7 @@ class VoiceInputState internal constructor(
         runCatching { r.startListening(intent) }
             .onFailure {
                 isListening = false
+                errorMessage = "Could not start on-device dictation. Check microphone access or type your message."
                 Log.w(TAG, "startListening failed: ${it.message}")
             }
     }
@@ -110,7 +123,7 @@ class VoiceInputState internal constructor(
         if (Build.VERSION.SDK_INT >= 31 &&
             SpeechRecognizer.isOnDeviceRecognitionAvailable(context)
         ) SpeechRecognizer.createOnDeviceSpeechRecognizer(context)
-        else SpeechRecognizer.createSpeechRecognizer(context)
+        else error("On-device recognition is unavailable")
 
     internal fun destroy() {
         runCatching { recognizer?.destroy() }

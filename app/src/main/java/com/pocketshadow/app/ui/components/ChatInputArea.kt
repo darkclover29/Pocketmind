@@ -19,10 +19,12 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.text.AnnotatedString
@@ -51,6 +53,7 @@ fun ChatInputArea(
     // Document mode
     documentActive : Boolean    = false,
     documentWords  : Int        = 0,
+    documentName   : String?    = null,
     onDocumentClear: () -> Unit = {},
     onDocumentClick: () -> Unit = {},
     isEmpty        : Boolean    = false,
@@ -68,6 +71,12 @@ fun ChatInputArea(
     val clipboardManager = LocalClipboardManager.current
     var historyIndex     by remember { mutableStateOf(-1) }   // -1 = not browsing history
     var dragAccumulator  by remember { mutableFloatStateOf(0f) }
+    var composerFocused  by remember { mutableStateOf(false) }
+    val composerScale by animateFloatAsState(
+        targetValue = if (composerFocused) 1f else 0.995f,
+        animationSpec = PocketShadowMotion.pressSpring,
+        label = "composer_focus_scale"
+    )
 
     Surface(
         modifier       = modifier.fillMaxWidth().imePadding(),
@@ -75,12 +84,56 @@ fun ChatInputArea(
         tonalElevation = 0.dp
     ) {
         Column {
+            AnimatedVisibility(
+                visible = documentActive,
+                enter = fadeIn(tween(PocketShadowMotion.microMs)) + expandVertically(
+                    animationSpec = spring(dampingRatio = Spring.DampingRatioNoBouncy)
+                ),
+                exit = fadeOut(tween(PocketShadowMotion.exitMs)) + shrinkVertically(
+                    animationSpec = tween(PocketShadowMotion.exitMs)
+                )
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(start = 18.dp, end = 18.dp, top = 6.dp, bottom = 2.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Surface(
+                        shape = RoundedCornerShape(50),
+                        color = VioletGlow,
+                        onClick = onDocumentClick
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Icon(Icons.Rounded.Article, null, tint = ElectricViolet, modifier = Modifier.size(16.dp))
+                            Text(
+                                "${documentName ?: "Document"} · $documentWords words",
+                                modifier = Modifier.weight(1f, fill = false),
+                                maxLines = 1,
+                                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                                style = MaterialTheme.typography.labelSmall.copy(
+                                    color = ElectricViolet,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                            )
+                            IconButton(onClick = onDocumentClear, modifier = Modifier.size(24.dp)) {
+                                Icon(Icons.Rounded.Close, "Remove document", modifier = Modifier.size(14.dp))
+                            }
+                        }
+                    }
+                }
+            }
             // ── Text field row ────────────────────────────────────────────────
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
                     .navigationBarsPadding()
-                    .padding(start = 12.dp, end = 12.dp, top = 6.dp, bottom = 12.dp),
+                    .padding(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 10.dp),
                 verticalAlignment     = Alignment.Bottom,
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
@@ -104,17 +157,23 @@ fun ChatInputArea(
                             text  = when {
                                 isListening    -> "Listening…"
                                 isGenerating   -> "Generating…"
-                                documentActive -> "Ask about the document ($documentWords words)…"
-                                else           -> if (inputHistory.isNotEmpty()) "Message PocketShadow (Swipe up for history)"
-                                                  else "Message PocketShadow"
+                                documentActive -> "Ask about this document…"
+                                else           -> "Message PocketShadow…"
                             },
-                            style = MaterialTheme.typography.bodyLarge.copy(color = hintColor)
+                            style = MaterialTheme.typography.bodyLarge.copy(color = hintColor),
+                            maxLines = 1,
+                            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
                         )
                     },
                     modifier  = Modifier
                         .weight(1f)
-                        .then(if (focusRequester != null) Modifier.focusRequester(focusRequester)
+                    .then(if (focusRequester != null) Modifier.focusRequester(focusRequester)
                               else Modifier)
+                        .onFocusChanged { composerFocused = it.isFocused }
+                        .graphicsLayer {
+                            scaleX = composerScale
+                            scaleY = composerScale
+                        }
                         .pointerInput(inputHistory) {
                             if (inputHistory.isEmpty()) return@pointerInput
                             detectVerticalDragGestures(
@@ -140,7 +199,7 @@ fun ChatInputArea(
                                 }
                             )
                         },
-                    shape     = RoundedCornerShape(26.dp),
+                    shape     = RoundedCornerShape(20.dp),
                     maxLines  = 6,
                     textStyle = MaterialTheme.typography.bodyLarge,
                     leadingIcon = {
@@ -208,7 +267,7 @@ fun ChatInputArea(
                     colors    = OutlinedTextFieldDefaults.colors(
                         // Filled-pill look: hairline border only, soft amber on focus —
                         // a full-strength outline reads harsh against OLED black.
-                        focusedBorderColor      = ElectricViolet.copy(alpha = 0.45f),
+                        focusedBorderColor      = ElectricViolet.copy(alpha = if (composerFocused) 0.72f else 0.45f),
                         unfocusedBorderColor    = borderColor.copy(alpha = 0.5f),
                         disabledBorderColor     = borderColor.copy(alpha = 0.25f),
                         focusedTextColor        = textColor,

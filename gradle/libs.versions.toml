@@ -1,5 +1,5 @@
 [versions]
-agp              = "8.5.2"
+agp              = "8.10.1"
 kotlin           = "2.2.0"
 ksp              = "2.2.0-2.0.2"         # must match kotlin version prefix
 compose-bom      = "2024.09.00"
@@ -36,6 +36,8 @@ compose-bom                   = { group = "androidx.compose",           name = "
 compose-ui                    = { group = "androidx.compose.ui",        name = "ui" }
 compose-ui-tooling            = { group = "androidx.compose.ui",        name = "ui-tooling" }
 compose-ui-tooling-preview    = { group = "androidx.compose.ui",        name = "ui-tooling-preview" }
+compose-ui-test-junit4        = { group = "androidx.compose.ui",        name = "ui-test-junit4" }
+compose-ui-test-manifest      = { group = "androidx.compose.ui",        name = "ui-test-manifest" }
 compose-material3             = { group = "androidx.compose.material3", name = "material3" }
 compose-material-icons-ext    = { group = "androidx.compose.material",  name = "material-icons-extended" }
 compose-activity              = { group = "androidx.activity",          name = "activity-compose",           version = "1.9.1" }

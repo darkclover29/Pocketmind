@@ -69,7 +69,7 @@ fun OnboardingScreen(onComplete: () -> Unit) {
                 .fillMaxSize()
                 .background(Color.Black)
                 .drawBehind {
-                    // Glowing violet and amber meshes floating organically
+                    // Subtle amber light carries the app palette through onboarding.
                     drawCircle(
                         brush = Brush.radialGradient(
                             colors = listOf(ElectricViolet.copy(alpha = 0.15f), Color.Transparent),
@@ -79,7 +79,7 @@ fun OnboardingScreen(onComplete: () -> Unit) {
                     )
                     drawCircle(
                         brush = Brush.radialGradient(
-                            colors = listOf(Color(0xFF4C1D95).copy(alpha = 0.20f), Color.Transparent),
+                            colors = listOf(AmberBright.copy(alpha = 0.11f), Color.Transparent),
                             center = androidx.compose.ui.geometry.Offset(size.width * xOffset2, size.height * yOffset2),
                             radius = size.minDimension * 0.85f
                         )
@@ -265,38 +265,6 @@ private fun WelcomePage() {
     }
 }
 
-@Composable
-private fun FeaturePill(icon: ImageVector, label: String) {
-    Surface(
-        shape  = RoundedCornerShape(50),
-        color  = Color(0x0EFFFFFF),
-        border = BorderStroke(
-            0.5.dp,
-            Brush.linearGradient(
-                listOf(
-                    Color.White.copy(alpha = 0.15f),
-                    ElectricViolet.copy(alpha = 0.25f)
-                )
-            )
-        )
-    ) {
-        Row(
-            modifier              = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
-            verticalAlignment     = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            Icon(icon, null, tint = ElectricViolet, modifier = Modifier.size(16.dp))
-            Text(
-                label,
-                style = MaterialTheme.typography.labelMedium.copy(
-                    color      = Color.White.copy(alpha = 0.9f),
-                    fontWeight = FontWeight.SemiBold
-                )
-            )
-        }
-    }
-}
-
 // ─────────────────────────────────────────────────────────────────────────────
 // Page 2 — Features (Staggered Animation List)
 // ─────────────────────────────────────────────────────────────────────────────
@@ -418,7 +386,46 @@ private fun ReadyOnDevicePage() {
             ),
             textAlign = TextAlign.Center
         )
-        Spacer(Modifier.height(32.dp))
+        Spacer(Modifier.height(24.dp))
+
+        // The core trust promise is visible before the user accepts the terms.
+        Surface(
+            shape = RoundedCornerShape(20.dp),
+            color = ElectricViolet.copy(alpha = 0.10f),
+            border = BorderStroke(1.dp, ElectricViolet.copy(alpha = 0.28f)),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Row(
+                modifier = Modifier.padding(16.dp),
+                verticalAlignment = Alignment.Top,
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                Icon(
+                    Icons.Rounded.Shield,
+                    contentDescription = null,
+                    tint = ElectricViolet,
+                    modifier = Modifier.size(26.dp)
+                )
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text(
+                        "Your data stays here",
+                        style = MaterialTheme.typography.titleSmall.copy(
+                            fontWeight = FontWeight.Bold,
+                            color = Color.White
+                        )
+                    )
+                    Text(
+                        "Prompts, replies, and saved chats are processed on this phone. No cloud, account, ads, or tracking.",
+                        style = MaterialTheme.typography.bodySmall.copy(
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            lineHeight = 18.sp
+                        )
+                    )
+                }
+            }
+        }
+
+        Spacer(Modifier.height(24.dp))
         Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
             ReadinessRow(
                 Icons.Rounded.WifiOff,
@@ -604,7 +611,7 @@ private fun TermsPage(onComplete: () -> Unit) {
             ) {
                 LegalSection(heading = "📋 Terms of Service", body = TERMS_OF_SERVICE)
                 HorizontalDivider(color = Color.White.copy(alpha = 0.1f))
-                LegalSection(heading = "🔒 Privacy Policy", body = PRIVACY_POLICY)
+                LegalSection(heading = "Privacy Policy", body = PRIVACY_POLICY)
             }
         }
 
@@ -727,7 +734,7 @@ private fun LegalSection(heading: String, body: String) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 private val TERMS_OF_SERVICE = """
-Last updated: June 2026
+Last updated: September 2026
 
 We've written this in plain English. Here's what you need to know.
 
@@ -764,7 +771,7 @@ Reach out via the Play Store listing page.
 private val PRIVACY_POLICY = """
 Last updated: June 2026
 
-Short version: we collect absolutely nothing.
+Short version: PocketShadow does not collect or transmit your personal data. Your conversations and preferences stay on this device.
 
 ▸ Zero data collection
 PocketShadow does not collect, store remotely, or transmit any personal information. No servers are involved. No databases outside your phone.
@@ -784,10 +791,17 @@ We have none of the following:
   • Any third-party service that can see your data
 
 ▸ How the AI works
-Your messages are processed by a Gemma language model running directly on your phone's processor. Think of it like a calculator — everything is computed locally and nothing is sent anywhere.
+Your messages are processed by a Gemma language model running directly on your phone's processor. Model replies are generated locally and your chat text is not sent to PocketShadow servers.
+
+▸ Voice input and microphone
+Voice input is optional. PocketShadow asks for microphone permission only when you tap the microphone. If you grant it, speech is processed by Android's on-device speech recognizer and the resulting transcription is placed in the message composer for you to review. PocketShadow does not record or save microphone audio. Dictation is unavailable when the device does not provide an on-device recognizer; PocketShadow does not fall back to online recognition, and you can continue by typing.
+
+▸ Read aloud
+Read-aloud uses an on-device text-to-speech voice when one is available. If no offline voice is installed, PocketShadow asks you to install one in Android settings instead of using an online voice.
 
 ▸ Permissions we use
-The only permission PocketShadow requests is VIBRATE, for optional haptic feedback when you send a message. That's it.
+• Microphone (RECORD_AUDIO): optional; requested only when you tap voice input. Audio is processed on-device for dictation and is not recorded or saved by PocketShadow. If on-device speech recognition is unavailable, dictation is disabled rather than sent to an online recognizer.
+• Vibration (VIBRATE): optional haptic feedback when you send a message or use selected actions.
 
 ▸ Delete your data anytime
 You're always in control:
@@ -803,3 +817,34 @@ If we make significant changes, we'll note them in the Play Store release notes.
 ▸ Questions?
 Reach out via the Play Store listing page.
 """.trimIndent()
+@Composable
+private fun FeaturePill(icon: ImageVector, label: String) {
+    Surface(
+        shape  = RoundedCornerShape(50),
+        color  = Color(0x0EFFFFFF),
+        border = BorderStroke(
+            0.5.dp,
+            Brush.linearGradient(
+                listOf(
+                    Color.White.copy(alpha = 0.15f),
+                    ElectricViolet.copy(alpha = 0.25f)
+                )
+            )
+        )
+    ) {
+        Row(
+            modifier              = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
+            verticalAlignment     = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Icon(icon, null, tint = ElectricViolet, modifier = Modifier.size(16.dp))
+            Text(
+                label,
+                style = MaterialTheme.typography.labelMedium.copy(
+                    color      = Color.White.copy(alpha = 0.9f),
+                    fontWeight = FontWeight.SemiBold
+                )
+            )
+        }
+    }
+}

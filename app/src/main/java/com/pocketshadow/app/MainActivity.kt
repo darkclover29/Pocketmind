@@ -23,6 +23,7 @@ import com.google.android.play.core.review.ReviewManagerFactory
 import com.pocketshadow.app.ui.screens.OnboardingScreen
 import com.pocketshadow.app.ui.screens.PocketShadowChatScreen
 import com.pocketshadow.app.ui.viewmodel.MainViewModel
+import com.pocketshadow.app.ui.theme.PocketShadowMotion
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.launch
 
@@ -65,10 +66,10 @@ class MainActivity : ComponentActivity() {
                 targetState    = onboardingDone,
                 transitionSpec = {
                     if (targetState) {
-                        (fadeIn(tween(400)) + scaleIn(tween(400), initialScale = 0.95f))
-                            .togetherWith(fadeOut(tween(250)))
+                        (fadeIn(tween(PocketShadowMotion.enterMs)) + scaleIn(tween(PocketShadowMotion.enterMs), initialScale = 0.97f))
+                            .togetherWith(fadeOut(tween(PocketShadowMotion.exitMs)))
                     } else {
-                        fadeIn(tween(300)).togetherWith(fadeOut(tween(300)))
+                        fadeIn(tween(PocketShadowMotion.enterMs)).togetherWith(fadeOut(tween(PocketShadowMotion.exitMs)))
                     }
                 },
                 label = "root_nav"
